@@ -1,21 +1,43 @@
 import json
 import time
+from dataclasses import dataclass
+
 import numpy as np
-from scipy.integrate import solve_ivp
 
 from nbody_core import (
-    init_positions_on_circle,
     init_positions_jittered_disk,
     run_rk2_loop,
     run_rk2_loop_with_noise,
     run_rk4_loop,
-    compute_velocity_overdamped,
-    compute_energy_numba,
-    compute_std_numba,
+    run_dop853_chunked,
 )
 
 DEFAULT_SOFTENING = 1e-1
 
+
+@dataclass
+class SimulationConfig:
+    # system/physics
+    n_particles: int = 10
+    k: float = 1.0
+    v0: float = 1.0
+    l: float = 1.0
+    softening: float = DEFAULT_SOFTENING
+    # integration / time
+    dt: float = 0.01
+    steps: int = 200
+    t0: float = 0.0
+    method: str = "rk4"  # "rk4" or "rk2" or "dop853"
+    # diffusion (rk2 only)
+    D: float = 0.0
+    var_chi: float = 1.0
+    seed: int = 0
+    # progress / chunking
+    chunk_steps: int = 5000
+    print_every_chunks: int = 1
+    # dop853 tolerances
+    rtol: float = 1e-6
+    atol: float = 1e-6
 
 # ----------------------------
 # Progress printing
@@ -35,89 +57,27 @@ def _progress(i_done, total, t_start, prefix="Progress"):
 
 
 # ----------------------------
-# DOP853 (chunked for progress)
-# ----------------------------
-def run_dop853_chunked(
-    r0,
-    k,
-    v0,
-    l,
-    softening,
-    dt,
-    steps,
-    t0,
-    rtol=1e-6,
-    atol=1e-6,
-    chunk_steps=5000,
-    print_every_chunks=1,
-):
-    """
-    Chunked DOP853 integration so we can print progress.
-    We sample the solution on a dt grid (t_eval).
-    """
-    n = r0.shape[0]
-    positions = np.empty((steps, n, 2), dtype=np.float64)
-    times = np.empty(steps, dtype=np.float64)
-    energy = np.empty(steps, dtype=np.float64)
-    std = np.empty(steps, dtype=np.float64)
-
-    def rhs(t, y):
-        r = y.reshape((n, 2))
-        vel = compute_velocity_overdamped(r, k, v0, l, softening)
-        return vel.reshape(-1)
-
-    y = r0.reshape(-1).copy()
-    t = t0
-    idx = 0
-    chunk_idx = 0
-
-    t_start = time.perf_counter()
-
-    while idx < steps:
-        m = min(chunk_steps, steps - idx)
-        t_eval = t + dt * np.arange(m)
-        t_span = (t_eval[0], t_eval[-1])
-
-        sol = solve_ivp(
-            fun=rhs,
-            t_span=t_span,
-            y0=y,
-            t_eval=t_eval,
-            method="DOP853",
-            rtol=rtol,
-            atol=atol,
-        )
-
-        if not sol.success:
-            raise RuntimeError(f"DOP853 failed: {sol.message}")
-
-        r_hist = sol.y.T.reshape((m, n, 2))
-        t_hist = sol.t
-
-        positions[idx : idx + m] = r_hist
-        times[idx : idx + m] = t_hist
-
-        # metrics
-        for i in range(m):
-            energy[idx + i] = compute_energy_numba(r_hist[i], k, v0, l, softening)
-            std[idx + i] = compute_std_numba(r_hist[i])
-
-        # prepare next chunk
-        y = sol.y[:, -1].copy()
-        t += m * dt
-        idx += m
-        chunk_idx += 1
-
-        if (chunk_idx % print_every_chunks == 0) or (idx == steps):
-            _progress(idx, steps, t_start, prefix="dop853 progress")
-
-    r_final = positions[-1]
-    return r_final, positions, energy, std, times
-
-
-# ----------------------------
 # Fixed-step (Numba) RK2/RK4 with progress via chunking
 # ----------------------------
+def _run_fixedstep_integrator(config: SimulationConfig, r0):
+    return run_fixedstep_chunked(
+        r0,
+        config.k,
+        config.v0,
+        config.l,
+        config.softening,
+        config.dt,
+        config.steps,
+        config.t0,
+        method=config.method,
+        D=config.D,
+        var_chi=config.var_chi,
+        seed=config.seed,
+        chunk_steps=config.chunk_steps,
+        print_every_chunks=config.print_every_chunks,
+    )
+
+
 def run_fixedstep_chunked(
     r0,
     k,
@@ -226,41 +186,45 @@ def run_simulation(
     rtol=1e-6,
     atol=1e-6,
 ):
-    r0 = init_positions_jittered_disk(n_particles, seed=seed)
+    config = SimulationConfig(
+        n_particles=n_particles,
+        k=k,
+        v0=v0,
+        l=l,
+        softening=softening,
+        dt=dt,
+        steps=steps,
+        t0=t0,
+        method=method,
+        D=D,
+        var_chi=var_chi,
+        seed=seed,
+        chunk_steps=chunk_steps,
+        print_every_chunks=print_every_chunks,
+        rtol=rtol,
+        atol=atol,
+    )
+
+    r0 = init_positions_jittered_disk(config.n_particles, seed=config.seed)
 
     t_start = time.perf_counter()
 
-    if method in ("rk4", "rk2"):
-        r_final, r_hist, pe_hist, std_hist, t_hist = run_fixedstep_chunked(
-            r0,
-            k,
-            v0,
-            l,
-            softening,
-            dt,
-            steps,
-            t0,
-            method=method,
-            D=D,          # example diffusion constant
-            var_chi=var_chi,
-            seed=seed,
-            chunk_steps=chunk_steps,
-            print_every_chunks=print_every_chunks,
-        )
-    elif method == "dop853":
+    if config.method in ("rk4", "rk2"):
+        r_final, r_hist, pe_hist, std_hist, t_hist = _run_fixedstep_integrator(config, r0)
+    elif config.method == "dop853":
         r_final, r_hist, pe_hist, std_hist, t_hist = run_dop853_chunked(
             r0,
-            k,
-            v0,
-            l,
-            softening,
-            dt,
-            steps,
-            t0,
-            rtol=rtol,
-            atol=atol,
-            chunk_steps=chunk_steps,
-            print_every_chunks=print_every_chunks,
+            config.k,
+            config.v0,
+            config.l,
+            config.softening,
+            config.dt,
+            config.steps,
+            config.t0,
+            rtol=config.rtol,
+            atol=config.atol,
+            chunk_steps=config.chunk_steps,
+            print_every_chunks=config.print_every_chunks,
         )
     else:
         raise ValueError("method must be 'rk4', 'rk2', or 'dop853'")
@@ -268,23 +232,23 @@ def run_simulation(
     elapsed = time.perf_counter() - t_start
 
     meta = dict(
-        n_particles=n_particles,
-        k=k,
-        v0=v0,
-        l=l,
-        dt=dt,
-        steps=steps,
-        method=method,
-        D=D if method == "rk2" else None,
-        var_chi=var_chi if method == "rk2" else None,
-        seed=seed,
-        softening=softening,
-        t0=t0,
-        rtol=rtol if method == "dop853" else None,
-        atol=atol if method == "dop853" else None,
-        chunk_steps=chunk_steps,
+        n_particles=config.n_particles,
+        k=config.k,
+        v0=config.v0,
+        l=config.l,
+        dt=config.dt,
+        steps=config.steps,
+        method=config.method,
+        D=config.D if config.method == "rk2" else None,
+        var_chi=config.var_chi if config.method == "rk2" else None,
+        seed=config.seed,
+        softening=config.softening,
+        t0=config.t0,
+        rtol=config.rtol if config.method == "dop853" else None,
+        atol=config.atol if config.method == "dop853" else None,
+        chunk_steps=config.chunk_steps,
         elapsed_sec=elapsed,
-        steps_per_sec=(steps / elapsed) if elapsed > 0 else None,
+        steps_per_sec=(config.steps / elapsed) if elapsed > 0 else None,
     )
 
     return dict(
@@ -320,6 +284,7 @@ if __name__ == "__main__":
         l=1.0,
         dt=1e-3,
         steps=500,
+        softening=1e-1,
         method="rk2",
         seed=1,
         D=1.0,          # example diffusion constant

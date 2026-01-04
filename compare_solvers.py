@@ -1,6 +1,4 @@
 import os
-import re
-import json
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -9,109 +7,12 @@ from matplotlib.collections import LineCollection
 import imageio_ffmpeg
 
 from simulate import run_simulation, save_npz
+from npz_io import load_npz
 
 # Notebook embedding
 from IPython.display import Video
 
 plt.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
-
-
-# ============================================================
-# IO: load npz (old + new compatible)
-# ============================================================
-
-def _infer_meta_from_filename_and_data(path, positions, times):
-    fname = os.path.basename(path)
-    meta = {}
-
-    if positions is not None:
-        meta["n_particles"] = int(positions.shape[1])
-        meta["steps"] = int(positions.shape[0])
-
-    if times is not None and len(times) >= 2:
-        meta["dt"] = float(np.median(np.diff(times)))
-        meta["t0"] = float(times[0])
-    else:
-        meta["dt"] = None
-        meta["t0"] = None
-
-    mN = re.search(r"N(\d+)", fname)
-    msteps = re.search(r"steps(\d+)", fname)
-    mdt = re.search(r"dt([0-9.]+(?:e[-+]?\d+)?)", fname, flags=re.IGNORECASE)
-    if mN:
-        meta["n_particles"] = int(mN.group(1))
-    if msteps:
-        meta["steps"] = int(msteps.group(1))
-    if mdt:
-        try:
-            meta["dt"] = float(mdt.group(1))
-        except ValueError:
-            pass
-
-    for method in ("dop853", "rk4", "rk2"):
-        if method in fname.lower():
-            meta["method"] = method
-            break
-    meta.setdefault("method", "unknown")
-
-    # common params (may be absent in old files)
-    meta.setdefault("k", None)
-    meta.setdefault("v0", None)
-    meta.setdefault("l", None)
-    meta.setdefault("softening", None)
-    meta.setdefault("random_walk_std", 0.0)
-
-    return meta
-
-
-def load_npz_compat(path):
-    data = np.load(path, allow_pickle=True)
-
-    def pick(*names):
-        for n in names:
-            if n in data.files:
-                return data[n]
-        return None
-
-    positions = pick("positions", "r_history", "r_hist")
-    times = pick("times", "t", "t_hist")
-    energy = pick("energy", "pe", "pe_history", "pe_hist")
-    std = pick("std", "std_history", "std_hist")
-    final_positions = pick("final_positions", "r_final")
-
-    if positions is None:
-        raise KeyError(f"{path}: couldn't find positions. Keys={data.files}")
-
-    if times is None:
-        times = np.arange(positions.shape[0], dtype=float)
-
-    if energy is None:
-        energy = np.full(positions.shape[0], np.nan)
-
-    if std is None:
-        std = np.full(positions.shape[0], np.nan)
-
-    if final_positions is None:
-        final_positions = positions[-1]
-
-    meta = None
-    if "meta_json" in data.files:
-        try:
-            meta = json.loads(str(data["meta_json"].item()))
-        except Exception:
-            meta = None
-    if meta is None:
-        meta = _infer_meta_from_filename_and_data(path, positions, times)
-
-    return {
-        "positions": positions,
-        "times": times,
-        "energy": energy,
-        "std": std,
-        "final_positions": final_positions,
-        "meta": meta,
-        "source_path": path,
-    }
 
 
 # ============================================================
@@ -210,8 +111,8 @@ def plot_divergence_sweep(experiments, *, title="RK4 vs DOP853 (sweep)",
         label = exp.get("label", f"Exp {idx}")
 
         if mode == "files":
-            sim_rk4 = load_npz_compat(exp["rk4_file"])
-            sim_dop = load_npz_compat(exp["dop_file"])
+            sim_rk4 = load_npz(exp["rk4_file"])
+            sim_dop = load_npz(exp["dop_file"])
 
         elif mode == "fresh":
             sim_rk4, sim_dop = run_comparison_fresh(**exp)
@@ -388,27 +289,35 @@ if __name__ == "__main__":
     experiments = [
         dict(
             mode="files",
-            label="N=100",
+            label="N=100, dt=1e-3",
             rk4_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\rk4_k3.0_N100_steps500_dt0.001_softening0.1_seed1.npz",
             dop_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\dop853_k3.0_N100_steps500_dt0.001_softening0.1_seed1.npz",
         ),
         dict(
             mode="files",
-            label="dt=1e-3",
+            label="N=1000, dt=1e-3",
             rk4_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\rk4_k3.0_N1000_steps500_dt0.001_softening0.1_seed1.npz",
             dop_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\dop853_k3.0_N1000_steps500_dt0.001_softening0.1_seed1.npz",
         ),
-        dict(mode="fresh", label="dt=1e-3, soft=1e-1", 
-             N=5000, dt=1e-3, steps=500, seed_init=1,
-             k=3.0, v0=1.0, l=1.0, softening=1e-1,
-             chunk_steps=100, print_every_chunks=1),
+        dict(
+            mode="files",
+            label="N=5000, dt=1e-3",
+            rk4_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\rk4_k3.0_N5000_steps500_dt0.001_softening0.1_seed1.npz",
+            dop_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\dop853_k3.0_N5000_steps500_dt0.001_softening0.1_seed1.npz",
+        ),
+        dict(mode="fresh", label="dt=1e-6, soft=1e-2", 
+             N=100, dt=1e-6, steps=500, seed_init=1,
+             k=3.0, v0=1.0, l=1.0, softening=1e-2,
+             chunk_steps=100, print_every_chunks=1)
     ]
+
+    
 
     plot_divergence_sweep(
         experiments,
         title="RK4 vs DOP853 (sweep, clipped)",
         t_max=5,
         save_path=r"graphs\multi_divergence_sweep_N_comparison.png",
-        save_fresh=True,
-        out_dir=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison",
+        #save_fresh=True,
+        #out_dir=r"data\04-01-2026_k3_soft1e-2_N100_dt_comparison",
     )
