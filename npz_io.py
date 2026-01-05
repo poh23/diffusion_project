@@ -14,7 +14,8 @@ def _pick(data, *names):
 def load_npz(path):
     """
     Load simulation data from .npz (expects new-format files with meta_json).
-    Returns a dict with positions, times, energy, std, final_positions, meta, source_path.
+    Returns a dict with positions, times, energy, std, final_positions,
+    optional density/radii if present, meta, source_path.
     """
     data = np.load(path, allow_pickle=True)
 
@@ -23,6 +24,8 @@ def load_npz(path):
     energy = _pick(data, "energy", "pe", "pe_history", "pe_hist")
     std = _pick(data, "std", "std_history", "std_hist")
     final_positions = _pick(data, "final_positions", "r_final")
+    density = _pick(data, "density")
+    radii = _pick(data, "radii")
 
     if positions is None:
         raise KeyError(f"{path}: couldn't find positions array. Keys = {data.files}")
@@ -54,6 +57,8 @@ def load_npz(path):
         energy=energy,
         std=std,
         final_positions=final_positions,
+        density=density,
+        radii=radii,
         meta=meta,
         source_path=path,
     )

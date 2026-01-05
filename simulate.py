@@ -1,6 +1,8 @@
+import argparse
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 
 import numpy as np
 
@@ -263,6 +265,8 @@ def run_simulation(
 
 def save_npz(out_path, sim_dict):
     meta_json = json.dumps(sim_dict["meta"])
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         out_path,
         positions=sim_dict["positions"],
@@ -276,21 +280,88 @@ def save_npz(out_path, sim_dict):
     print(f"Meta: {sim_dict['meta']}")
 
 
+def _load_config_file(config_path: Path) -> SimulationConfig:
+    with config_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    allowed_keys = set(SimulationConfig.__dataclass_fields__.keys())
+    filtered = {k: v for k, v in data.items() if k in allowed_keys}
+    unknown = set(data.keys()) - allowed_keys
+    if unknown:
+        print(f"Warning: ignoring unknown config keys: {sorted(unknown)}")
+
+    return SimulationConfig(**filtered)
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Run diffusion simulation and save NPZ output.")
+    parser.add_argument("--config", type=Path, help="JSON config file matching SimulationConfig fields.")
+    parser.add_argument("--out", type=Path, help="Output .npz path (default: data/sim_<timestamp>.npz).")
+
+    parser.add_argument("--n-particles", type=int)
+    parser.add_argument("--k", type=float)
+    parser.add_argument("--v0", type=float)
+    parser.add_argument("--l", type=float)
+    parser.add_argument("--softening", type=float)
+    parser.add_argument("--dt", type=float)
+    parser.add_argument("--steps", type=int)
+    parser.add_argument("--t0", type=float)
+    parser.add_argument("--method", choices=["rk2", "rk4", "dop853"])
+    parser.add_argument("--D", type=float, help="Diffusion constant (rk2 only).")
+    parser.add_argument("--var-chi", type=float, help="Variance of chi per coordinate (rk2 only).")
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--chunk-steps", type=int)
+    parser.add_argument("--print-every-chunks", type=int)
+    parser.add_argument("--rtol", type=float, help="dop853 relative tolerance.")
+    parser.add_argument("--atol", type=float, help="dop853 absolute tolerance.")
+    return parser.parse_args()
+
+
+def _config_from_args(args) -> SimulationConfig:
+    config = SimulationConfig()
+    if args.config:
+        config = _load_config_file(args.config)
+
+    overrides = {
+        "n_particles": args.n_particles,
+        "k": args.k,
+        "v0": args.v0,
+        "l": args.l,
+        "softening": args.softening,
+        "dt": args.dt,
+        "steps": args.steps,
+        "t0": args.t0,
+        "method": args.method,
+        "D": args.D,
+        "var_chi": args.var_chi,
+        "seed": args.seed,
+        "chunk_steps": args.chunk_steps,
+        "print_every_chunks": args.print_every_chunks,
+        "rtol": args.rtol,
+        "atol": args.atol,
+    }
+
+    overrides = {k: v for k, v in overrides.items() if v is not None}
+    if overrides:
+        config = replace(config, **overrides)
+
+    return config
+
+
+def main():
+    args = _parse_args()
+    config = _config_from_args(args)
+
+    sim = run_simulation(**config.__dict__)
+
+    if args.out:
+        out_path = args.out
+    else:
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        out_path = Path("data") / f"sim_{timestamp}.npz"
+
+    save_npz(out_path, sim)
+
+
 if __name__ == "__main__":
-    sim = run_simulation(
-        n_particles=100,
-        k=3.0,
-        v0=1.0,
-        l=1.0,
-        dt=1e-3,
-        steps=500,
-        softening=1e-1,
-        method="rk2",
-        seed=1,
-        D=1.0,          # example diffusion constant
-        var_chi=1.0,    # standard normal
-        # progress
-        chunk_steps=100000,          # prints more often for small steps; for big runs set 2000-5000
-        print_every_chunks=1,
-    )
-    save_npz("data/31-12-2025_k3_rk2_w_diff/rk2_w_random_walk_std1.0_k3.0_N100_steps500_dt1e-3_softening1e-1_new.npz", sim)
+    main()

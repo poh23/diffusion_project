@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 import matplotlib.pyplot as plt
 
 import imageio_ffmpeg
@@ -132,8 +133,68 @@ def animate_mp4(sim, out_path="simulation.mp4", fps=30, dpi=120, step=10,
     return embed_mp4(path, width=width, embed=embed)
 
 
+def plot_density_vs_radius(sim, times, window_frac=0.05, min_window=5, ax=None, show=True):
+    """
+    Plot density vs radius for selected times using a smoothed curve.
+      sim: simulation dict with keys "times", "density" (steps,n), "positions" or "radii" (steps,n)
+      times: iterable of times (float); nearest sample is used
+      window_frac: fraction of points used as smoothing window for Gaussian filter
+      min_window: minimum window size (int)
+    """
+    if "density" not in sim:
+        raise KeyError("Simulation dict must contain 'density' array.")
+
+    density = np.asarray(sim["density"])
+    sim_times = np.asarray(sim["times"])
+
+    if "radii" in sim:
+        radii = np.asarray(sim["radii"])
+    else:
+        radii = np.linalg.norm(np.asarray(sim["positions"]), axis=2)
+
+    if density.shape != radii.shape:
+        raise ValueError(f"density shape {density.shape} and radii shape {radii.shape} differ.")
+
+    created_fig = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 5))
+        created_fig = True
+    else:
+        fig = ax.figure
+
+    times = np.atleast_1d(times)
+
+    for t in times:
+        idx = int(np.abs(sim_times - t).argmin())
+        r = radii[idx]
+        d = density[idx]
+
+        order = np.argsort(r)
+        r_sorted = r[order]
+        d_sorted = d[order]
+
+        window = max(min_window, int(len(d_sorted) * window_frac))
+        if window % 2 == 0:
+            window += 1  # ensure odd for nicer symmetry
+        sigma = window / 6.0  # approx converts window to stddev
+
+        d_smooth = gaussian_filter1d(d_sorted, sigma=sigma, mode="nearest")
+        ax.plot(r_sorted, d_smooth, label=f"t~{sim_times[idx]:.3g}")
+
+    ax.set_xlabel("Radius")
+    ax.set_ylabel("Density (1 / Voronoi area)")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    plt.tight_layout()
+
+    if show:
+        plt.show()
+    elif created_fig:
+        # Only close if we created the figure; otherwise leave it open for caller.
+        plt.close(fig)
+    return fig, ax
+
+
 if __name__ == "__main__":
-    sim = load_npz(r"data\dop853_N100_steps5000_dt0.001.npy.npz")
-    plot_energy(sim)
-    plot_std(sim, show_theory=True, k=1.0, v0=1.0, l=1.0)
-    save_mp4(sim, out_path="sim_output.mp4", step=10)
+    sim = load_npz(r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\dop853_k3.0_N1000_steps500_dt0.001_softening0.1_seed1_with_density.npz")
+    plot_density_vs_radius(sim, times=[0,sim["times"][1],sim["times"][2],sim["times"][3], sim["times"][-1]], window_frac=0.02)
