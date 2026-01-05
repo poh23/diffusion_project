@@ -1,6 +1,7 @@
 import time
 import numpy as np
 from scipy.integrate import solve_ivp
+from tqdm.auto import tqdm
 
 from ..common import compute_velocity_overdamped, compute_energy_numba, compute_std_numba
 
@@ -39,9 +40,9 @@ def run_dop853_chunked(
     y = r0.reshape(-1).copy()
     t = t0
     idx = 0
-    chunk_idx = 0
-
     t_start = time.perf_counter()
+    show_progress = print_every_chunks is None or print_every_chunks > 0
+    pbar = tqdm(total=steps, desc="dop853", unit="step", disable=not show_progress)
 
     while idx < steps:
         m = min(chunk_steps, steps - idx)
@@ -76,18 +77,11 @@ def run_dop853_chunked(
         y = sol.y[:, -1].copy()
         t += m * dt
         idx += m
-        chunk_idx += 1
 
-        if (chunk_idx % print_every_chunks == 0) or (idx == steps):
-            elapsed = time.perf_counter() - t_start
-            rate = idx / elapsed if elapsed > 0 else 0.0
-            eta = (steps - idx) / rate if rate > 0 else float("inf")
-            pct = 100.0 * idx / steps if steps else 100.0
-            eta_str = "?" if eta == float("inf") else f"{eta:,.1f}s"
-            print(
-                f"dop853 progress: {pct:6.2f}%  ({idx}/{steps})  "
-                f"elapsed={elapsed:,.1f}s  ETA={eta_str}  rate={rate:,.1f} steps/s"
-            )
+        if show_progress:
+            pbar.update(m)
 
     r_final = positions[-1]
+    if show_progress:
+        pbar.close()
     return r_final, positions, energy, std, times

@@ -1,7 +1,10 @@
 import os
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
+import argparse
+import json
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 from matplotlib.collections import LineCollection
 import imageio_ffmpeg
@@ -93,7 +96,9 @@ def plot_divergence_pair(sim_a, sim_b, *, title="Solver Error Relative to Spacin
 
 def plot_divergence_sweep(experiments, *, title="RK4 vs DOP853 (sweep)",
                           t_max=None, save_path=None, show=True, alpha_band=0.15,
-                          save_fresh=False, out_dir="data"):
+                          save_fresh=False, out_dir="data",
+                          compute_density_default=False, density_print_every_default=None,
+                          density_stride_default=1):
     """
     experiments: list of dicts.
       mode="fresh": runs simulate.py twice (rk4 + dop853)
@@ -115,12 +120,19 @@ def plot_divergence_sweep(experiments, *, title="RK4 vs DOP853 (sweep)",
             sim_dop = load_npz(exp["dop_file"])
 
         elif mode == "fresh":
-            sim_rk4, sim_dop = run_comparison_fresh(**exp)
+            fresh_kwargs = dict(exp)
+            compute_density_val = fresh_kwargs.pop("compute_density", compute_density_default)
+            density_print_every_val = fresh_kwargs.pop("density_print_every", density_print_every_default)
+            density_stride_val = fresh_kwargs.pop("density_stride", density_stride_default)
 
-            if save_fresh:
-                stem = _stem_from_exp(exp)
-                save_npz(os.path.join(out_dir, f"rk4_{stem}.npz"), sim_rk4)
-                save_npz(os.path.join(out_dir, f"dop853_{stem}.npz"), sim_dop)
+            sim_rk4, sim_dop = run_comparison_fresh(
+                **fresh_kwargs,
+                save_fresh=save_fresh,
+                out_dir=out_dir,
+                compute_density=compute_density_val,
+                density_print_every=density_print_every_val,
+                density_stride=density_stride_val,
+            )
 
         else:
             raise ValueError(f"Unknown experiment mode: {mode}")
@@ -255,6 +267,11 @@ def run_comparison_fresh(
     atol=1e-6,
     mode="fresh",
     label=None,
+    save_fresh=False,
+    out_dir="data",
+    compute_density=False,
+    density_print_every=None,
+    density_stride=1,
 ):
     sim_rk4 = run_simulation(
         n_particles=N, k=k, v0=v0, l=l,
@@ -264,7 +281,16 @@ def run_comparison_fresh(
         softening=softening,
         chunk_steps=chunk_steps,
         print_every_chunks=print_every_chunks,
+        compute_density=compute_density,
+        density_print_every=density_print_every,
+        density_stride=density_stride,
     )
+
+    if save_fresh:
+        stem = _stem_from_exp(dict(N=N, dt=dt, steps=steps, k=k, softening=softening, seed_init=seed_init))
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        save_npz(out_dir / f"rk4_{stem}.npz", sim_rk4)
 
     sim_dop = run_simulation(
         n_particles=N, k=k, v0=v0, l=l,
@@ -276,9 +302,41 @@ def run_comparison_fresh(
         print_every_chunks=print_every_chunks,
         rtol=rtol,
         atol=atol,
+        compute_density=compute_density,
+        density_print_every=density_print_every,
+        density_stride=density_stride,
     )
 
+    if save_fresh:
+        stem = _stem_from_exp(dict(N=N, dt=dt, steps=steps, k=k, softening=softening, seed_init=seed_init))
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        save_npz(out_dir / f"dop853_{stem}.npz", sim_dop)
+
     return sim_rk4, sim_dop
+
+
+def _load_experiments_config(path: Path):
+    with Path(path).open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError("Config file must contain a JSON list of experiment dicts.")
+    return data
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Compare solvers and optionally plot/save results.")
+    parser.add_argument("--config", type=Path, required=True, help="JSON file with list of experiment dicts.")
+    parser.add_argument("--title", default="RK4 vs DOP853 (sweep)", help="Plot title.")
+    parser.add_argument("--t-max", type=float, help="Clip times to this value.")
+    parser.add_argument("--save-path", type=Path, help="Path to save the plot PNG.")
+    parser.add_argument("--out-dir", type=Path, default=Path("data"), help="Directory to save fresh runs when enabled.")
+    parser.add_argument("--save-fresh", action="store_true", help="Save fresh runs to disk.")
+    parser.add_argument("--no-show", action="store_true", help="Do not display the plot.")
+    parser.add_argument("--compute-density", action="store_true", help="Compute Voronoi density/radii for fresh runs.")
+    parser.add_argument("--density-print-every", type=int, help="Print progress every N steps during density calc (fresh).")
+    parser.add_argument("--density-stride", type=int, help="Compute density every N steps (fresh).")
+    return parser.parse_args()
 
 
 # ============================================================
@@ -286,38 +344,18 @@ def run_comparison_fresh(
 # ============================================================
 
 if __name__ == "__main__":
-    experiments = [
-        dict(
-            mode="files",
-            label="N=100, dt=1e-3",
-            rk4_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\rk4_k3.0_N100_steps500_dt0.001_softening0.1_seed1.npz",
-            dop_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\dop853_k3.0_N100_steps500_dt0.001_softening0.1_seed1.npz",
-        ),
-        dict(
-            mode="files",
-            label="N=1000, dt=1e-3",
-            rk4_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\rk4_k3.0_N1000_steps500_dt0.001_softening0.1_seed1.npz",
-            dop_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\dop853_k3.0_N1000_steps500_dt0.001_softening0.1_seed1.npz",
-        ),
-        dict(
-            mode="files",
-            label="N=5000, dt=1e-3",
-            rk4_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\rk4_k3.0_N5000_steps500_dt0.001_softening0.1_seed1.npz",
-            dop_file=r"data\31-12-2025_k3_soft0.1_dt1e_N_comparison\dop853_k3.0_N5000_steps500_dt0.001_softening0.1_seed1.npz",
-        ),
-        dict(mode="fresh", label="dt=1e-6, soft=1e-2", 
-             N=100, dt=1e-6, steps=500, seed_init=1,
-             k=3.0, v0=1.0, l=1.0, softening=1e-2,
-             chunk_steps=100, print_every_chunks=1)
-    ]
-
-    
+    args = _parse_args()
+    experiments = _load_experiments_config(args.config)
 
     plot_divergence_sweep(
         experiments,
-        title="RK4 vs DOP853 (sweep, clipped)",
-        t_max=5,
-        save_path=r"graphs\multi_divergence_sweep_N_comparison.png",
-        #save_fresh=True,
-        #out_dir=r"data\04-01-2026_k3_soft1e-2_N100_dt_comparison",
+        title=args.title,
+        t_max=args.t_max,
+        save_path=args.save_path,
+        show=not args.no_show,
+        save_fresh=args.save_fresh,
+        out_dir=args.out_dir,
+        compute_density_default=args.compute_density,
+        density_print_every_default=args.density_print_every,
+        density_stride_default=args.density_stride,
     )

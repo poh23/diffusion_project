@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
+from tqdm.auto import tqdm
 
 from nbody_core import (
     init_positions_jittered_disk,
@@ -13,6 +14,7 @@ from nbody_core import (
     run_rk4_loop,
     run_dop853_chunked,
 )
+from density_voronoi import compute_density_and_radius_series
 
 DEFAULT_SOFTENING = 1e-1
 
@@ -35,28 +37,15 @@ class SimulationConfig:
     var_chi: float = 1.0
     seed: int = 0
     # progress / chunking
-    chunk_steps: int = 5000
+    chunk_steps: int = 0
     print_every_chunks: int = 1
     # dop853 tolerances
     rtol: float = 1e-6
     atol: float = 1e-6
-
-# ----------------------------
-# Progress printing
-# ----------------------------
-def _progress(i_done, total, t_start, prefix="Progress"):
-    frac = i_done / total if total else 1.0
-    elapsed = time.perf_counter() - t_start
-    rate = i_done / elapsed if elapsed > 0 else 0.0
-    eta = (total - i_done) / rate if rate > 0 else float("inf")
-
-    pct = 100.0 * frac
-    eta_str = "?" if eta == float("inf") else f"{eta:,.1f}s"
-    print(
-        f"{prefix}: {pct:6.2f}%  ({i_done}/{total})  "
-        f"elapsed={elapsed:,.1f}s  ETA={eta_str}  rate={rate:,.1f} steps/s"
-    )
-
+    # optional density computation (post-process, SciPy Voronoi)
+    compute_density: bool = False
+    density_print_every: int | None = None
+    density_stride: int = 1  # compute every n steps when density is enabled
 
 # ----------------------------
 # Fixed-step (Numba) RK2/RK4 with progress via chunking
@@ -112,9 +101,8 @@ def run_fixedstep_chunked(
     r = r0.copy()
     t = t0
     idx = 0
-    chunk_idx = 0
-
-    t_start = time.perf_counter()
+    show_progress = print_every_chunks is None or print_every_chunks > 0
+    pbar = tqdm(total=steps, desc=method, unit="step", disable=not show_progress)
 
     while idx < steps:
         m = min(chunk_steps, steps - idx)
@@ -156,12 +144,23 @@ def run_fixedstep_chunked(
         r = r_final
         t += m * dt
         idx += m
-        chunk_idx += 1
 
-        if (chunk_idx % print_every_chunks == 0) or (idx == steps):
-            _progress(idx, steps, t_start, prefix=f"{method} progress")
+        if show_progress:
+            pbar.update(m)
 
+    if show_progress:
+        pbar.close()
     return r, positions, energy, std, times
+
+
+def _auto_chunk_steps(steps: int, *, target_updates: int = 100, min_chunk: int = 100, max_chunk: int = 5000) -> int:
+    """
+    Choose a chunk size to get roughly target_updates progress updates without making chunks too small.
+    """
+    if steps <= 0:
+        return min_chunk
+    chunk = max(min_chunk, steps // max(1, target_updates))
+    return int(max(1, min(chunk, max_chunk)))
 
 
 # ----------------------------
@@ -187,6 +186,9 @@ def run_simulation(
     # dop853 tolerances
     rtol=1e-6,
     atol=1e-6,
+    compute_density=False,
+    density_print_every=None,
+    density_stride=1,
 ):
     config = SimulationConfig(
         n_particles=n_particles,
@@ -205,9 +207,19 @@ def run_simulation(
         print_every_chunks=print_every_chunks,
         rtol=rtol,
         atol=atol,
+        compute_density=compute_density,
+        density_print_every=density_print_every,
+        density_stride=density_stride,
     )
 
     r0 = init_positions_jittered_disk(config.n_particles, seed=config.seed)
+
+    # If chunk_steps <= 0, auto-select for nicer tqdm updates
+    if config.chunk_steps <= 0:
+        if config.method == "dop853":
+            config = replace(config, chunk_steps=_auto_chunk_steps(config.steps, target_updates=80, min_chunk=500, max_chunk=10000))
+        else:
+            config = replace(config, chunk_steps=_auto_chunk_steps(config.steps, target_updates=100, min_chunk=100, max_chunk=5000))
 
     t_start = time.perf_counter()
 
@@ -233,6 +245,32 @@ def run_simulation(
 
     elapsed = time.perf_counter() - t_start
 
+    density = None
+    radii = None
+    if config.compute_density:
+        # stride > 1: compute densities on subsampled steps to save time
+        if config.density_stride > 1:
+            r_hist_for_density = r_hist[:: config.density_stride]
+        else:
+            r_hist_for_density = r_hist
+
+        density_raw, radii_raw = compute_density_and_radius_series(
+            r_hist_for_density,
+            print_every=config.density_print_every,
+        )
+
+        if config.density_stride > 1:
+            # expand back to full length with NaNs for skipped steps to keep alignment
+            steps = len(r_hist)
+            n = r_hist.shape[1]
+            density = np.full((steps, n), np.nan, dtype=np.float64)
+            radii = np.full((steps, n), np.nan, dtype=np.float64)
+            density[:: config.density_stride] = density_raw
+            radii[:: config.density_stride] = radii_raw
+        else:
+            density = density_raw
+            radii = radii_raw
+
     meta = dict(
         n_particles=config.n_particles,
         k=config.k,
@@ -249,6 +287,8 @@ def run_simulation(
         rtol=config.rtol if config.method == "dop853" else None,
         atol=config.atol if config.method == "dop853" else None,
         chunk_steps=config.chunk_steps,
+        density_method="voronoi_2d" if config.compute_density else None,
+        density_stride=1 if config.compute_density else None,
         elapsed_sec=elapsed,
         steps_per_sec=(config.steps / elapsed) if elapsed > 0 else None,
     )
@@ -259,6 +299,8 @@ def run_simulation(
         energy=pe_hist,
         std=std_hist,
         final_positions=r_final,
+        density=density,
+        radii=radii,
         meta=meta,
     )
 
@@ -267,14 +309,25 @@ def save_npz(out_path, sim_dict):
     meta_json = json.dumps(sim_dict["meta"])
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    arrays = {
+        "positions": sim_dict["positions"],
+        "times": sim_dict["times"],
+        "energy": sim_dict["energy"],
+        "std": sim_dict["std"],
+        "final_positions": sim_dict["final_positions"],
+        "meta_json": np.array(meta_json, dtype=object),
+    }
+
+    # optional
+    if sim_dict.get("density") is not None:
+        arrays["density"] = sim_dict["density"]
+    if sim_dict.get("radii") is not None:
+        arrays["radii"] = sim_dict["radii"]
+
     np.savez_compressed(
         out_path,
-        positions=sim_dict["positions"],
-        times=sim_dict["times"],
-        energy=sim_dict["energy"],
-        std=sim_dict["std"],
-        final_positions=sim_dict["final_positions"],
-        meta_json=np.array(meta_json, dtype=object),
+        **arrays,
     )
     print(f"Saved: {out_path}")
     print(f"Meta: {sim_dict['meta']}")
@@ -314,6 +367,9 @@ def _parse_args():
     parser.add_argument("--print-every-chunks", type=int)
     parser.add_argument("--rtol", type=float, help="dop853 relative tolerance.")
     parser.add_argument("--atol", type=float, help="dop853 absolute tolerance.")
+    parser.add_argument("--compute-density", action="store_true", help="Compute Voronoi density/radii (post-process).")
+    parser.add_argument("--density-print-every", type=int, help="Print progress every N steps during density computation.")
+    parser.add_argument("--density-stride", type=int, help="Compute density every N steps (default 1 = every step).")
     return parser.parse_args()
 
 
@@ -339,6 +395,9 @@ def _config_from_args(args) -> SimulationConfig:
         "print_every_chunks": args.print_every_chunks,
         "rtol": args.rtol,
         "atol": args.atol,
+        "compute_density": args.compute_density,
+        "density_print_every": args.density_print_every,
+        "density_stride": args.density_stride,
     }
 
     overrides = {k: v for k, v in overrides.items() if v is not None}
