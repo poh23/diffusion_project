@@ -12,11 +12,12 @@ from nbody_core import (
     run_rk2_loop,
     run_rk2_loop_with_noise,
     run_rk4_loop,
+    run_rk23_dynamic,
     run_dop853_chunked,
 )
 from density_voronoi import compute_density_and_radius_series
 
-DEFAULT_SOFTENING = 1e-1
+DEFAULT_R_FLOOR = 1e-12
 
 
 @dataclass
@@ -26,12 +27,12 @@ class SimulationConfig:
     k: float = 1.0
     v0: float = 1.0
     l: float = 1.0
-    softening: float = DEFAULT_SOFTENING
+    r_floor: float = DEFAULT_R_FLOOR
     # integration / time
     dt: float = 0.01
     steps: int = 200
     t0: float = 0.0
-    method: str = "rk4"  # "rk4" or "rk2" or "dop853"
+    method: str = "rk4"  # "rk4" or "rk2" or "rk23" or "dop853"
     # diffusion (rk2 only)
     D: float = 0.0
     var_chi: float = 1.0
@@ -42,6 +43,13 @@ class SimulationConfig:
     # dop853 tolerances
     rtol: float = 1e-6
     atol: float = 1e-6
+    # rk23 adaptive settings
+    first_step: float | None = None
+    max_step_global: float = np.inf
+    eta: float = 0.05
+    recompute_every: int = 10
+    rk23_sample_dt: float | None = None
+    rk23_sample_count: int | None = None
     # optional density computation (post-process, SciPy Voronoi)
     compute_density: bool = False
     density_print_every: int | None = None
@@ -56,7 +64,7 @@ def _run_fixedstep_integrator(config: SimulationConfig, r0):
         config.k,
         config.v0,
         config.l,
-        config.softening,
+        config.r_floor,
         config.dt,
         config.steps,
         config.t0,
@@ -74,7 +82,7 @@ def run_fixedstep_chunked(
     k,
     v0,
     l,
-    softening,
+    r_floor,
     dt,
     steps,
     t0,
@@ -109,7 +117,7 @@ def run_fixedstep_chunked(
 
         if method == "rk4":
             r_final, r_hist, pe_hist, std_hist, t_hist = run_rk4_loop(
-                r, k, v0, l, softening, dt, m, t
+                r, k, v0, l, r_floor, dt, m, t
             )
         elif method == "rk2":
             if D > 0.0:
@@ -123,13 +131,13 @@ def run_fixedstep_chunked(
                 noise = (np.sqrt(2.0 * D * dt) * chi).astype(np.float64)
 
                 r_final, r_hist, pe_hist, std_hist, t_hist = run_rk2_loop_with_noise(
-                    r, k, v0, l, softening, dt, m, t, noise
+                    r, k, v0, l, r_floor, dt, m, t, noise
                 )
             else:
                 # no diffusion
                 seed_numba = (seed + idx) & 0xFFFFFFFF
                 r_final, r_hist, pe_hist, std_hist, t_hist = run_rk2_loop(
-                    r, k, v0, l, softening, dt, m, t,
+                    r, k, v0, l, r_floor, dt, m, t,
                     random_walk_std=0.0, seed=seed_numba
                 )
 
@@ -174,11 +182,12 @@ def run_simulation(
     l=1.0,
     dt=0.01,
     steps=200,
-    method="rk4",  # "rk4" or "rk2" or "dop853"
+    method="rk4",  # "rk4" or "rk2" or "rk23" or "dop853"
     D=0.0,        # diffusion constant (used for rk2)
     var_chi=1.0,  # Var(chi) per coordinate
     seed=0,
-    softening=DEFAULT_SOFTENING,
+    r_floor=DEFAULT_R_FLOOR,
+    softening=None,
     t0=0.0,
     # progress control
     chunk_steps=5000,
@@ -186,16 +195,25 @@ def run_simulation(
     # dop853 tolerances
     rtol=1e-6,
     atol=1e-6,
+    # rk23 adaptive settings
+    first_step=None,
+    max_step_global=np.inf,
+    eta=0.05,
+    recompute_every=10,
+    rk23_sample_dt=None,
+    rk23_sample_count=None,
     compute_density=False,
     density_print_every=None,
     density_stride=1,
 ):
+    if softening is not None:
+        r_floor = softening
     config = SimulationConfig(
         n_particles=n_particles,
         k=k,
         v0=v0,
         l=l,
-        softening=softening,
+        r_floor=r_floor,
         dt=dt,
         steps=steps,
         t0=t0,
@@ -207,6 +225,12 @@ def run_simulation(
         print_every_chunks=print_every_chunks,
         rtol=rtol,
         atol=atol,
+        first_step=first_step,
+        max_step_global=max_step_global,
+        eta=eta,
+        recompute_every=recompute_every,
+        rk23_sample_dt=rk23_sample_dt,
+        rk23_sample_count=rk23_sample_count,
         compute_density=compute_density,
         density_print_every=density_print_every,
         density_stride=density_stride,
@@ -222,16 +246,63 @@ def run_simulation(
             config = replace(config, chunk_steps=_auto_chunk_steps(config.steps, target_updates=100, min_chunk=100, max_chunk=5000))
 
     t_start = time.perf_counter()
+    rk23_stats = None
 
     if config.method in ("rk4", "rk2"):
         r_final, r_hist, pe_hist, std_hist, t_hist = _run_fixedstep_integrator(config, r0)
+    elif config.method == "rk23":
+        t_span = (config.t0, config.t0 + config.steps * config.dt)
+        show_progress = config.print_every_chunks is None or config.print_every_chunks > 0
+        pbar = None
+        last_progress = 0
+        if show_progress:
+            total = config.rk23_sample_count if config.rk23_sample_count is not None else None
+            pbar = tqdm(total=total, desc="rk23", unit="step")
+
+        def _rk23_progress(t, r, solver):
+            nonlocal last_progress
+            if pbar is None:
+                return
+            if config.rk23_sample_dt is not None and config.rk23_sample_dt > 0.0:
+                current = int(np.floor((t - config.t0) / config.rk23_sample_dt)) + 1
+                if config.rk23_sample_count is not None:
+                    current = min(current, config.rk23_sample_count)
+                delta = current - last_progress
+                if delta > 0:
+                    pbar.update(delta)
+                    last_progress = current
+            else:
+                pbar.update(1)
+
+        r_final, r_hist, pe_hist, std_hist, t_hist, rk23_stats = run_rk23_dynamic(
+            r0,
+            config.k,
+            config.v0,
+            config.l,
+            config.r_floor,
+            t_span,
+            rtol=config.rtol,
+            atol=config.atol,
+            first_step=config.first_step,
+            max_step_global=config.max_step_global,
+            eta=config.eta,
+            recompute_every=config.recompute_every,
+            sample_dt=config.rk23_sample_dt,
+            sample_count=config.rk23_sample_count,
+            callback=_rk23_progress if show_progress else None,
+            record=True,
+            method="RK23",
+            return_stats=True,
+        )
+        if pbar is not None:
+            pbar.close()
     elif config.method == "dop853":
         r_final, r_hist, pe_hist, std_hist, t_hist = run_dop853_chunked(
             r0,
             config.k,
             config.v0,
             config.l,
-            config.softening,
+            config.r_floor,
             config.dt,
             config.steps,
             config.t0,
@@ -241,7 +312,7 @@ def run_simulation(
             print_every_chunks=config.print_every_chunks,
         )
     else:
-        raise ValueError("method must be 'rk4', 'rk2', or 'dop853'")
+        raise ValueError("method must be 'rk4', 'rk2', 'rk23', or 'dop853'")
 
     elapsed = time.perf_counter() - t_start
 
@@ -282,10 +353,17 @@ def run_simulation(
         D=config.D if config.method == "rk2" else None,
         var_chi=config.var_chi if config.method == "rk2" else None,
         seed=config.seed,
-        softening=config.softening,
+        r_floor=config.r_floor,
         t0=config.t0,
-        rtol=config.rtol if config.method == "dop853" else None,
-        atol=config.atol if config.method == "dop853" else None,
+        rtol=config.rtol if config.method in ("dop853", "rk23") else None,
+        atol=config.atol if config.method in ("dop853", "rk23") else None,
+        first_step=config.first_step if config.method == "rk23" else None,
+        max_step_global=config.max_step_global if config.method == "rk23" else None,
+        eta=config.eta if config.method == "rk23" else None,
+        recompute_every=config.recompute_every if config.method == "rk23" else None,
+        rk23_sample_dt=config.rk23_sample_dt if config.method == "rk23" else None,
+        rk23_sample_count=config.rk23_sample_count if config.method == "rk23" else None,
+        rk23_stats=rk23_stats if config.method == "rk23" else None,
         chunk_steps=config.chunk_steps,
         density_method="voronoi_2d" if config.compute_density else None,
         density_stride=1 if config.compute_density else None,
@@ -337,6 +415,9 @@ def _load_config_file(config_path: Path) -> SimulationConfig:
     with config_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
+    if "r_floor" not in data and "softening" in data:
+        data["r_floor"] = data["softening"]
+
     allowed_keys = set(SimulationConfig.__dataclass_fields__.keys())
     filtered = {k: v for k, v in data.items() if k in allowed_keys}
     unknown = set(data.keys()) - allowed_keys
@@ -355,18 +436,25 @@ def _parse_args():
     parser.add_argument("--k", type=float)
     parser.add_argument("--v0", type=float)
     parser.add_argument("--l", type=float)
-    parser.add_argument("--softening", type=float)
+    parser.add_argument("--r-floor", type=float, help="Hard distance floor for interactions.")
+    parser.add_argument("--softening", type=float, help="Deprecated alias for --r-floor.")
     parser.add_argument("--dt", type=float)
     parser.add_argument("--steps", type=int)
     parser.add_argument("--t0", type=float)
-    parser.add_argument("--method", choices=["rk2", "rk4", "dop853"])
+    parser.add_argument("--method", choices=["rk2", "rk4", "rk23", "dop853"])
     parser.add_argument("--D", type=float, help="Diffusion constant (rk2 only).")
     parser.add_argument("--var-chi", type=float, help="Variance of chi per coordinate (rk2 only).")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--chunk-steps", type=int)
     parser.add_argument("--print-every-chunks", type=int)
-    parser.add_argument("--rtol", type=float, help="dop853 relative tolerance.")
-    parser.add_argument("--atol", type=float, help="dop853 absolute tolerance.")
+    parser.add_argument("--rtol", type=float, help="Relative tolerance (rk23/dop853).")
+    parser.add_argument("--atol", type=float, help="Absolute tolerance (rk23/dop853).")
+    parser.add_argument("--first-step", type=float, help="Initial step guess (rk23).")
+    parser.add_argument("--max-step-global", type=float, help="Global max step size (rk23).")
+    parser.add_argument("--eta", type=float, help="Safety factor for rk23 distance cap.")
+    parser.add_argument("--recompute-every", type=int, help="Recompute rk23 distance cap every N steps.")
+    parser.add_argument("--rk23-sample-dt", type=float, help="Sample interval for rk23 output (optional).")
+    parser.add_argument("--rk23-sample-count", type=int, help="Number of samples for rk23 output (optional).")
     parser.add_argument("--compute-density", action="store_true", help="Compute Voronoi density/radii (post-process).")
     parser.add_argument("--density-print-every", type=int, help="Print progress every N steps during density computation.")
     parser.add_argument("--density-stride", type=int, help="Compute density every N steps (default 1 = every step).")
@@ -378,12 +466,13 @@ def _config_from_args(args) -> SimulationConfig:
     if args.config:
         config = _load_config_file(args.config)
 
+    r_floor_arg = args.r_floor if args.r_floor is not None else args.softening
     overrides = {
         "n_particles": args.n_particles,
         "k": args.k,
         "v0": args.v0,
         "l": args.l,
-        "softening": args.softening,
+        "r_floor": r_floor_arg,
         "dt": args.dt,
         "steps": args.steps,
         "t0": args.t0,
@@ -395,6 +484,12 @@ def _config_from_args(args) -> SimulationConfig:
         "print_every_chunks": args.print_every_chunks,
         "rtol": args.rtol,
         "atol": args.atol,
+        "first_step": args.first_step,
+        "max_step_global": args.max_step_global,
+        "eta": args.eta,
+        "recompute_every": args.recompute_every,
+        "rk23_sample_dt": args.rk23_sample_dt,
+        "rk23_sample_count": args.rk23_sample_count,
         "compute_density": args.compute_density,
         "density_print_every": args.density_print_every,
         "density_stride": args.density_stride,

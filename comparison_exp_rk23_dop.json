@@ -1,0 +1,42 @@
+[
+  {
+    "mode": "fresh",
+    "label": "rk23 vs dop853, N=100, dt=0.01, r_floor=1e-12",
+    "solver_a": "rk23",
+    "solver_b": "dop853",
+    "N": 100,
+    "dt": 0.01,
+    "steps": 5000,
+    "rk23_sample_dt": 0.01,
+    "rk23_sample_count": 5000,
+    "seed_init": 1,
+    "k": 3.0,
+    "v0": 1.0,
+    "l": 1.0,
+    "r_floor": 1e-12,
+    "print_every_chunks": 1,
+    "rtol": 1e-6,
+    "atol": 1e-6,
+    "compute_density": false
+  },
+  {
+    "mode": "fresh",
+    "label": "rk23 vs dop853, N=1000, dt=0.01, r_floor=1e-12",
+    "solver_a": "rk23",
+    "solver_b": "dop853",
+    "N": 1000,
+    "dt": 0.01,
+    "steps": 5000,
+    "rk23_sample_dt": 0.01,
+    "rk23_sample_count": 5000,
+    "seed_init": 1,
+    "k": 3.0,
+    "v0": 1.0,
+    "l": 1.0,
+    "r_floor": 1e-12,
+    "print_every_chunks": 1,
+    "rtol": 1e-6,
+    "atol": 1e-6,
+    "compute_density": false
+  }
+]

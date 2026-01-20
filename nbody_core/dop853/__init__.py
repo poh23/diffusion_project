@@ -13,7 +13,7 @@ def run_dop853_chunked(
     k,
     v0,
     l,
-    softening,
+    r_floor,
     dt,
     steps,
     t0,
@@ -34,7 +34,7 @@ def run_dop853_chunked(
 
     def rhs(t, y):
         r = y.reshape((n, 2))
-        vel = compute_velocity_overdamped(r, k, v0, l, softening)
+        vel = compute_velocity_overdamped(r, k, v0, l, r_floor)
         return vel.reshape(-1)
 
     y = r0.reshape(-1).copy()
@@ -70,7 +70,7 @@ def run_dop853_chunked(
 
         # metrics
         for i in range(m):
-            energy[idx + i] = compute_energy_numba(r_hist[i], k, v0, l, softening)
+            energy[idx + i] = compute_energy_numba(r_hist[i], k, v0, l, r_floor)
             std[idx + i] = compute_std_numba(r_hist[i])
 
         # prepare next chunk

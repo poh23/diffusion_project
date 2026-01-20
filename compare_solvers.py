@@ -101,7 +101,7 @@ def plot_divergence_sweep(experiments, *, title="RK4 vs DOP853 (sweep)",
                           density_stride_default=1):
     """
     experiments: list of dicts.
-      mode="fresh": runs simulate.py twice (rk4 + dop853)
+      mode="fresh": runs simulate.py twice (solver_a + solver_b)
       mode="files": loads two npz files
     """
     if save_fresh:
@@ -116,8 +116,8 @@ def plot_divergence_sweep(experiments, *, title="RK4 vs DOP853 (sweep)",
         label = exp.get("label", f"Exp {idx}")
 
         if mode == "files":
-            sim_rk4 = load_npz(exp["rk4_file"])
-            sim_dop = load_npz(exp["dop_file"])
+            sim_a = load_npz(exp.get("solver_a_file", exp.get("rk4_file")))
+            sim_b = load_npz(exp.get("solver_b_file", exp.get("dop_file")))
 
         elif mode == "fresh":
             fresh_kwargs = dict(exp)
@@ -125,7 +125,7 @@ def plot_divergence_sweep(experiments, *, title="RK4 vs DOP853 (sweep)",
             density_print_every_val = fresh_kwargs.pop("density_print_every", density_print_every_default)
             density_stride_val = fresh_kwargs.pop("density_stride", density_stride_default)
 
-            sim_rk4, sim_dop = run_comparison_fresh(
+            sim_a, sim_b = run_comparison_fresh(
                 **fresh_kwargs,
                 save_fresh=save_fresh,
                 out_dir=out_dir,
@@ -137,7 +137,7 @@ def plot_divergence_sweep(experiments, *, title="RK4 vs DOP853 (sweep)",
         else:
             raise ValueError(f"Unknown experiment mode: {mode}")
 
-        times, norm_dists = compute_norm_dists(sim_rk4, sim_dop)
+        times, norm_dists = compute_norm_dists(sim_a, sim_b)
 
         if t_max is not None:
             mask = times <= t_max
@@ -181,9 +181,11 @@ def _stem_from_exp(exp):
     dt = exp["dt"]
     steps = exp["steps"]
     k = exp.get("k", 1.0)
-    soft = exp.get("softening", 1e-1)
+    r_floor = exp.get("r_floor", exp.get("softening", 1e-1))
     seed = exp.get("seed_init", 1)
-    return f"k{k}_N{N}_steps{steps}_dt{dt}_softening{soft}_seed{seed}"
+    solver_a = exp.get("solver_a", "rk4")
+    solver_b = exp.get("solver_b", "dop853")
+    return f"k{k}_N{N}_steps{steps}_dt{dt}_r_floor{r_floor}_{solver_a}_vs_{solver_b}_seed{seed}"
 
 
 # ============================================================
@@ -259,12 +261,16 @@ def animate_comparison_mp4(sim_a, sim_b, filename="solver_comparison.mp4", step=
 def run_comparison_fresh(
     *,
     N, dt, steps,
-    k=1.0, v0=1.0, l=1.0, softening=1e-1,
+    k=1.0, v0=1.0, l=1.0, r_floor=1e-1, softening=None,
     seed_init=1,
     chunk_steps=5000,
     print_every_chunks=1,
     rtol=1e-6,
     atol=1e-6,
+    solver_a="rk4",
+    solver_b="dop853",
+    rk23_sample_dt=None,
+    rk23_sample_count=None,
     mode="fresh",
     label=None,
     save_fresh=False,
@@ -273,47 +279,62 @@ def run_comparison_fresh(
     density_print_every=None,
     density_stride=1,
 ):
-    sim_rk4 = run_simulation(
+    if softening is not None:
+        r_floor = softening
+
+    print(f"Running {solver_a}: N={N}, dt={dt}, steps={steps}, k={k}, r_floor={r_floor}")
+    sim_a = run_simulation(
         n_particles=N, k=k, v0=v0, l=l,
         dt=dt, steps=steps,
-        method="rk4",
+        method=solver_a,
         seed=seed_init,
-        softening=softening,
+        r_floor=r_floor,
         chunk_steps=chunk_steps,
         print_every_chunks=print_every_chunks,
+        rk23_sample_dt=rk23_sample_dt,
+        rk23_sample_count=rk23_sample_count,
         compute_density=compute_density,
         density_print_every=density_print_every,
         density_stride=density_stride,
     )
 
     if save_fresh:
-        stem = _stem_from_exp(dict(N=N, dt=dt, steps=steps, k=k, softening=softening, seed_init=seed_init))
+        stem = _stem_from_exp(dict(
+            N=N, dt=dt, steps=steps, k=k, r_floor=r_floor, seed_init=seed_init,
+            solver_a=solver_a, solver_b=solver_b
+        ))
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        save_npz(out_dir / f"rk4_{stem}.npz", sim_rk4)
+        save_npz(out_dir / f"{solver_a}_{stem}.npz", sim_a)
 
-    sim_dop = run_simulation(
+    print(f"Running {solver_b}: N={N}, dt={dt}, steps={steps}, k={k}, r_floor={r_floor}")
+    sim_b = run_simulation(
         n_particles=N, k=k, v0=v0, l=l,
         dt=dt, steps=steps,
-        method="dop853",
+        method=solver_b,
         seed=seed_init,
-        softening=softening,
+        r_floor=r_floor,
         chunk_steps=chunk_steps,
         print_every_chunks=print_every_chunks,
         rtol=rtol,
         atol=atol,
+        rk23_sample_dt=rk23_sample_dt,
+        rk23_sample_count=rk23_sample_count,
         compute_density=compute_density,
         density_print_every=density_print_every,
         density_stride=density_stride,
     )
 
     if save_fresh:
-        stem = _stem_from_exp(dict(N=N, dt=dt, steps=steps, k=k, softening=softening, seed_init=seed_init))
+        stem = _stem_from_exp(dict(
+            N=N, dt=dt, steps=steps, k=k, r_floor=r_floor, seed_init=seed_init,
+            solver_a=solver_a, solver_b=solver_b
+        ))
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        save_npz(out_dir / f"dop853_{stem}.npz", sim_dop)
+        save_npz(out_dir / f"{solver_b}_{stem}.npz", sim_b)
 
-    return sim_rk4, sim_dop
+    return sim_a, sim_b
 
 
 def _load_experiments_config(path: Path):
