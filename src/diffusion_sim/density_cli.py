@@ -3,12 +3,12 @@ from pathlib import Path
 
 import numpy as np
 
-from .io.npz import load_npz
+from .io.h5 import load_h5, save_h5
+from .io.npz import load_npz, save_npz
 from .postprocess.density_voronoi import (
     compute_density_and_radius_series,
     process_file,
     process_files,
-    save_with_density,
 )
 
 
@@ -23,12 +23,32 @@ def _parse_args():
     return parser.parse_args()
 
 
+def _load_sim(path: Path):
+    if path.suffix.lower() in {".h5", ".hdf5"}:
+        return load_h5(path)
+    return load_npz(path)
+
+
+def _save_sim(path: Path, sim: dict, density: np.ndarray, radii: np.ndarray | None, stride: int | None):
+    sim_out = dict(sim)
+    sim_out["density"] = density
+    sim_out["radii"] = radii
+    sim_out["meta"] = dict(sim.get("meta", {}) or {})
+    if stride is not None:
+        sim_out["meta"]["density_stride"] = stride
+
+    if path.suffix.lower() in {".h5", ".hdf5"}:
+        save_h5(path, sim_out)
+    else:
+        save_npz(path, sim_out)
+
+
 def main():
     args = _parse_args()
     include_radii = not args.no_radii
     files = [str(Path(path)) for path in args.files]
 
-    if args.stride <= 1:
+    if args.stride <= 1 and all(Path(path).suffix.lower() not in {".h5", ".hdf5"} for path in files):
         if len(files) == 1:
             process_file(
                 Path(files[0]),
@@ -50,7 +70,7 @@ def main():
 
     for path_str in files:
         path = Path(path_str)
-        sim = load_npz(path)
+        sim = _load_sim(path)
         r_hist = sim["positions"]
         r_hist_sub = r_hist[:: args.stride]
         density_raw, radii_raw = compute_density_and_radius_series(
@@ -68,14 +88,12 @@ def main():
             radii = np.full((total_steps, n), np.nan, dtype=np.float64)
             radii[:: args.stride] = radii_raw
 
-        out_path = path if args.overwrite else path.with_name(f"{path.stem}{args.suffix}.npz")
-        save_with_density(
-            sim,
-            density,
-            radii,
-            out_path,
-            density_stride=args.stride,
-        )
+        if args.overwrite:
+            out_path = path
+        else:
+            out_path = path.with_name(f"{path.stem}{args.suffix}{path.suffix}")
+
+        _save_sim(out_path, sim, density, radii, args.stride)
 
 
 if __name__ == "__main__":

@@ -101,6 +101,12 @@ To compute density every N steps:
 diffusion-density data/20260120/your_run.npz --stride 10
 ```
 
+HDF5 files are also supported:
+
+```bash
+diffusion-density data/20260121/your_run.h5 --stride 10
+```
+
 Config file fields (JSON)
 -------------------------
 
