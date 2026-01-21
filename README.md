@@ -16,6 +16,12 @@ Basic:
 python simulate.py --method rk4 --n-particles 100 --steps 500 --dt 1e-3
 ```
 
+Installed CLI (after `pip install -e .`):
+
+```bash
+diffusion-sim --method rk4 --n-particles 100 --steps 500 --dt 1e-3
+```
+
 Config file:
 
 ```bash
@@ -26,24 +32,18 @@ Core arguments
 --------------
 
 - `--config`: Path to a JSON config file (matches `SimulationConfig` fields).
-- `--out`: Output `.npz` path (default: `data/sim_<timestamp>.npz`).
+- `--out`: Output `.npz` path (default: `data/YYYYMMDD/<method>_N<N>_steps<steps>_dt<dt>_k<k>_rtol<rtol>_atol<atol>.npz`).
 - `--n-particles`: Number of particles (`n_particles`).
 - `--k`: Power-law exponent.
 - `--v0`: Coupling prefactor.
 - `--l`: Length scale (usually `1.0`).
 - `--r-floor`: Hard distance floor for interactions.
-- `--softening`: Deprecated alias for `--r-floor`.
+- `--init-radius`: Initial disk radius for particle placement.
 - `--dt`: Time step (fixed-step methods) or requested sampling interval for RK23 when sampling is enabled.
 - `--steps`: Number of steps (fixed-step) or sample count for RK23 when sampling is enabled.
 - `--t0`: Initial time.
 - `--method`: One of `rk2`, `rk4`, `rk23`, `dop853`.
-- `--seed`: RNG seed for initialization and diffusion noise.
-
-RK2 diffusion
--------------
-
-- `--D`: Diffusion constant (rk2 only).
-- `--var-chi`: Variance of chi per coordinate (rk2 only).
+- `--seed`: RNG seed for initialization.
 
 Progress / chunking
 -------------------
@@ -66,6 +66,8 @@ RK23 adaptive options
 - `--recompute-every`: Recompute distance-based cap every N accepted steps.
 - `--rk23-sample-dt`: Sample interval for RK23 output (optional).
 - `--rk23-sample-count`: Number of samples for RK23 output (optional).
+- `--rk23-status-every-steps`: Update rk23 progress status every N accepted steps.
+- `--rk23-status-every-sec`: Update rk23 progress status every N seconds.
 
 If `rk23_sample_dt` and `rk23_sample_count` are not set, RK23 returns data at
 accepted solver steps (no interpolation).
@@ -102,6 +104,10 @@ All CLI options map to fields in `SimulationConfig`. Example:
 Notes
 -----
 
-- `softening` is deprecated; use `r_floor`.
 - For RK23, sampling is optional and controlled by `rk23_sample_dt` and
   `rk23_sample_count`.
+
+Future tasks
+------------
+
+- Add an optional post-step stochastic callback for RK23 (apply a random process after each accepted deterministic step).

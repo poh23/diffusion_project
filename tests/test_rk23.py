@@ -2,10 +2,12 @@ import unittest
 import numpy as np
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_PATH))
 
-from nbody_core import run_rk23_dynamic
+from diffusion_sim.integrators.rk23 import run_rk23_dynamic
 
 
 def _min_pairwise_dist(r, r_floor):

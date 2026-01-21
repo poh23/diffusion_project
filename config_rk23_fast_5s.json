@@ -1,0 +1,21 @@
+{
+  "n_particles": 1000,
+  "steps": 500,
+  "method": "rk23",
+  "seed": 1,
+  "k": 3.0,
+  "v0": 1.0,
+  "l": 1.0,
+  "r_floor": 1e-7,
+  "dt": 0.01,
+  "t0": 0.0,
+  "print_every_chunks": 1,
+  "rtol": 1e-3,
+  "atol": 1e-3,
+  "eta": 10,
+  "recompute_every": 200,
+  "rk23_sample_dt": 1e-4,
+  "rk23_status_every_steps": 200,
+  "rk23_status_every_sec": 10.0,
+  "compute_density": false
+}
