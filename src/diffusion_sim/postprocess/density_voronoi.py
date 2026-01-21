@@ -60,9 +60,17 @@ def compute_density_and_radius_series(r_hist: np.ndarray, print_every: int | Non
     return densities, radii
 
 
-def save_with_density(sim: dict, density: np.ndarray, radii: np.ndarray | None, out_path: Path):
+def save_with_density(
+    sim: dict,
+    density: np.ndarray,
+    radii: np.ndarray | None,
+    out_path: Path,
+    density_stride: int | None = None,
+):
     meta = dict(sim["meta"])
     meta["density_method"] = "voronoi_2d"
+    if density_stride is not None:
+        meta["density_stride"] = density_stride
     meta_json = json.dumps(meta)
 
     arrays = {

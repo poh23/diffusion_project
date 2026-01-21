@@ -69,8 +69,7 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append("steps must be > 0")
     if config.r_floor < 0.0:
         errors.append("r_floor must be >= 0")
-    if config.k == 0.0:
-        errors.append("k must be non-zero (k=0 requires a log potential)")
+    # k=0 is supported (log potential), but keep other checks intact
     if config.init_radius <= 0.0:
         errors.append("init_radius must be > 0")
     if config.method not in ("rk2", "rk4", "rk23", "dop853"):

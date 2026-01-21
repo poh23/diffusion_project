@@ -79,6 +79,27 @@ Density post-processing
 - `--density-print-every`: Print progress every N steps during density computation.
 - `--density-stride`: Compute density every N steps (default 1 = every step).
 
+Standalone density CLI
+----------------------
+
+After `pip install -e .`, you can run:
+
+```bash
+diffusion-density data/20260120/your_run.npz --suffix _with_density --print-every 10
+```
+
+To overwrite in place:
+
+```bash
+diffusion-density data/20260120/your_run.npz --overwrite
+```
+
+To compute density every N steps:
+
+```bash
+diffusion-density data/20260120/your_run.npz --stride 10
+```
+
 Config file fields (JSON)
 -------------------------
 
@@ -104,6 +125,7 @@ All CLI options map to fields in `SimulationConfig`. Example:
 Notes
 -----
 
+- `k=0` uses the logarithmic potential energy (limit of the power-law form).
 - For RK23, sampling is optional and controlled by `rk23_sample_dt` and
   `rk23_sample_count`.
 

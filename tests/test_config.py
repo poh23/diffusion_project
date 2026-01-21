@@ -10,11 +10,6 @@ from diffusion_sim.config import SimulationConfig, validate_config
 
 
 class TestConfigValidation(unittest.TestCase):
-    def test_rejects_k_zero(self):
-        config = SimulationConfig(k=0.0)
-        with self.assertRaises(ValueError):
-            validate_config(config)
-
     def test_rejects_non_positive_dt(self):
         config = SimulationConfig(dt=0.0)
         with self.assertRaises(ValueError):

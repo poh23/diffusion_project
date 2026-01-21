@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 diffusion-sim = "diffusion_sim.cli:main"
+diffusion-density = "diffusion_sim.density_cli:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

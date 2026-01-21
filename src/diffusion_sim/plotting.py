@@ -126,13 +126,26 @@ def animate_mp4(sim, out_path="simulation.mp4", fps=30, dpi=120, step=10,
     return embed_mp4(path, width=width, embed=embed)
 
 
-def plot_density_vs_radius(sim, times, window_frac=0.05, min_window=5, ax=None, show=True):
+def plot_density_vs_radius(
+    sim,
+    times,
+    window_frac=0.05,
+    min_window=5,
+    ax=None,
+    show=True,
+    drop_zeros=False,
+    min_points=10,
+    snap_to_stride=True,
+):
     """
     Plot density vs radius for selected times using a smoothed curve.
       sim: simulation dict with keys "times", "density" (steps,n), "positions" or "radii" (steps,n)
       times: iterable of times (float); nearest sample is used
       window_frac: fraction of points used as smoothing window for Gaussian filter
       min_window: minimum window size (int)
+      drop_zeros: drop zero-density points (unbounded Voronoi cells)
+      min_points: minimum finite points required to plot a curve
+      snap_to_stride: snap requested times to the nearest valid density step when stride is used
     """
     if "density" not in sim:
         raise KeyError("Simulation dict must contain 'density' array.")
@@ -157,22 +170,47 @@ def plot_density_vs_radius(sim, times, window_frac=0.05, min_window=5, ax=None, 
 
     times = np.atleast_1d(times)
 
+    stride = None
+    if snap_to_stride:
+        stride = sim.get("meta", {}).get("density_stride")
+        if not stride or stride <= 1:
+            stride = None
+
     for t in times:
         idx = int(np.abs(sim_times - t).argmin())
+        if stride is not None:
+            idx = int(round(idx / stride) * stride)
+            idx = max(0, min(idx, len(sim_times) - 1))
         r = radii[idx]
         d = density[idx]
+
+        finite = np.isfinite(r) & np.isfinite(d)
+        if drop_zeros:
+            finite &= d > 0.0
+        if finite.sum() < min_points:
+            print(f"Warning: insufficient finite density points at t~{sim_times[idx]:.3g}; skipping.")
+            continue
+        r = r[finite]
+        d = d[finite]
 
         order = np.argsort(r)
         r_sorted = r[order]
         d_sorted = d[order]
 
-        window = max(min_window, int(len(d_sorted) * window_frac))
-        if window % 2 == 0:
-            window += 1  # ensure odd for nicer symmetry
-        sigma = window / 6.0  # approx converts window to stddev
+        if window_frac and window_frac > 0.0:
+            window = max(min_window, int(len(d_sorted) * window_frac))
+            window = min(window, len(d_sorted))
+            if window < 1:
+                window = 1
+            if window % 2 == 0 and window > 1:
+                window -= 1  # ensure odd for nicer symmetry
+            sigma = window / 6.0  # approx converts window to stddev
 
-        d_smooth = gaussian_filter1d(d_sorted, sigma=sigma, mode="nearest")
-        ax.plot(r_sorted, d_smooth, label=f"t~{sim_times[idx]:.3g}")
+            d_plot = gaussian_filter1d(d_sorted, sigma=sigma, mode="nearest")
+        else:
+            d_plot = d_sorted
+
+        ax.plot(r_sorted, d_plot, label=f"t~{sim_times[idx]:.3g}")
 
     ax.set_xlabel("Radius")
     ax.set_ylabel("Density (1 / Voronoi area)")
@@ -186,3 +224,129 @@ def plot_density_vs_radius(sim, times, window_frac=0.05, min_window=5, ax=None, 
         # Only close if we created the figure; otherwise leave it open for caller.
         plt.close(fig)
     return fig, ax
+
+
+def plot_scaled_density_vs_radius(
+    sim,
+    times,
+    *,
+    k=None,
+    window_frac=0.05,
+    min_window=5,
+    ax_pair=None,
+    show=True,
+    drop_zeros=False,
+    min_points=10,
+    snap_to_stride=True,
+):
+    """
+    Plot scaled density for selected times:
+      1) density * t^(2/(k+2)) vs r / t^(1/(k+2))
+      2) (density * t^(2/(k+2)))^(3/2) vs r^2 / t^(2/(k+2))
+    """
+    if "density" not in sim:
+        raise KeyError("Simulation dict must contain 'density' array.")
+
+    meta = sim.get("meta", {}) or {}
+    if k is None:
+        k = meta.get("k", None)
+    if k is None:
+        raise ValueError("k is required (pass k=... or include it in sim['meta']).")
+
+    density = np.asarray(sim["density"])
+    sim_times = np.asarray(sim["times"])
+    if "radii" in sim:
+        radii = np.asarray(sim["radii"])
+    else:
+        radii = np.linalg.norm(np.asarray(sim["positions"]), axis=2)
+
+    if density.shape != radii.shape:
+        raise ValueError(f"density shape {density.shape} and radii shape {radii.shape} differ.")
+
+    created_fig = False
+    if ax_pair is None:
+        fig, (ax1, ax2) = plt.subplots(figsize=(12, 5), ncols=2)
+        created_fig = True
+    else:
+        ax1, ax2 = ax_pair
+        fig = ax1.figure
+
+    gamma = 1.0 / (k + 2.0)
+    times = np.atleast_1d(times)
+
+    stride = None
+    if snap_to_stride:
+        stride = meta.get("density_stride")
+        if not stride or stride <= 1:
+            stride = None
+
+    for t in times:
+        idx = int(np.abs(sim_times - t).argmin())
+        if stride is not None:
+            idx = int(round(idx / stride) * stride)
+            idx = max(0, min(idx, len(sim_times) - 1))
+
+        t_val = float(sim_times[idx])
+        if t_val <= 0.0:
+            print(f"Warning: t={t_val:.3g} is not positive; skipping.")
+            continue
+
+        r = radii[idx]
+        d = density[idx]
+
+        finite = np.isfinite(r) & np.isfinite(d)
+        if drop_zeros:
+            finite &= d > 0.0
+        if finite.sum() < min_points:
+            print(f"Warning: insufficient finite density points at t~{t_val:.3g}; skipping.")
+            continue
+
+        r = r[finite]
+        d = d[finite]
+
+        t_scale = t_val ** gamma
+        r_scaled = r / t_scale
+        d_scaled = d * (t_val ** (2.0 * gamma))
+
+        order = np.argsort(r_scaled)
+        r_sorted = r_scaled[order]
+        d_sorted = d_scaled[order]
+
+        if window_frac and window_frac > 0.0:
+            window = max(min_window, int(len(d_sorted) * window_frac))
+            window = min(window, len(d_sorted))
+            if window < 1:
+                window = 1
+            if window % 2 == 0 and window > 1:
+                window -= 1
+            sigma = window / 6.0
+            d_plot = gaussian_filter1d(d_sorted, sigma=sigma, mode="nearest")
+        else:
+            d_plot = d_sorted
+
+        ax1.plot(r_sorted, d_plot, label=f"t~{t_val:.3g}")
+
+        r2_scaled = (r * r) / (t_val ** (2.0 * gamma))
+        y2 = d_scaled ** 1.5
+        order2 = np.argsort(r2_scaled)
+        x2 = r2_scaled[order2]
+        y2 = y2[order2]
+        ax2.plot(x2, y2, label=f"t~{t_val:.3g}")
+
+    ax1.set_xlabel(r"$r / t^{\frac{1}{k+2}}$")
+    ax1.set_ylabel(r"$\rho t^{\frac{2}{k+2}}$")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+
+    ax2.set_xlabel(r"$r^2 / t^{\frac{2}{k+2}}$")
+    ax2.set_ylabel(r"$(\rho t^{\frac{2}{k+2}})^{3/2}$")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    elif created_fig:
+        plt.close(fig)
+    return fig, (ax1, ax2)

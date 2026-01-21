@@ -18,7 +18,11 @@ def compute_energy_numba(r, k, v0, l, r_floor):
             dist_sq = dx * dx + dy * dy
             dist = np.sqrt(dist_sq)
             dist_eff = dist if dist > r_floor else r_floor
-            local_pe += coupling / (k * (dist_eff ** k))
+            if k == 0.0:
+                # limit k->0 of coupling/(k * r^k) is -coupling * ln(r) up to a constant
+                local_pe += -coupling * np.log(dist_eff)
+            else:
+                local_pe += coupling / (k * (dist_eff ** k))
         pe += local_pe
     return pe
 
