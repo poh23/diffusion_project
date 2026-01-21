@@ -32,7 +32,8 @@ Core arguments
 --------------
 
 - `--config`: Path to a JSON config file (matches `SimulationConfig` fields).
-- `--out`: Output `.npz` path (default: `data/YYYYMMDD/<method>_N<N>_steps<steps>_dt<dt>_k<k>_rtol<rtol>_atol<atol>.npz`).
+- `--out`: Output `.npz` path (default: `data/YYYYMMDD/<method>_N<N>_steps<steps>_dt<dt>_k<k>_rtol<rtol>_atol<atol>.npz`). Use `.h5` or `.hdf5` to save in HDF5 format.
+- `--out-format`: Controls the default output suffix when `--out` is not provided (`npz`, `h5`, or `hdf5`). Can also be set in JSON config as `out_format`.
 - `--n-particles`: Number of particles (`n_particles`).
 - `--k`: Power-law exponent.
 - `--v0`: Coupling prefactor.

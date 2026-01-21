@@ -24,6 +24,7 @@ class SimulationConfig:
     t0: float = 0.0
     method: str = "rk4"  # "rk4" or "rk2" or "rk23" or "dop853"
     seed: int = 0
+    out_format: str = "npz"
     # progress / chunking
     chunk_steps: int = 0
     print_every_chunks: int = 1
@@ -48,6 +49,9 @@ class SimulationConfig:
 def load_config_file(config_path: Path) -> SimulationConfig:
     with config_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
+
+    if "out_format" not in data and "out-format" in data:
+        data["out_format"] = data["out-format"]
 
     allowed_keys = set(SimulationConfig.__dataclass_fields__.keys())
     filtered = {k: v for k, v in data.items() if k in allowed_keys}
@@ -74,6 +78,8 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append("init_radius must be > 0")
     if config.method not in ("rk2", "rk4", "rk23", "dop853"):
         errors.append("method must be one of: rk2, rk4, rk23, dop853")
+    if config.out_format not in ("npz", "h5", "hdf5"):
+        errors.append("out_format must be one of: npz, h5, hdf5")
     if config.density_stride <= 0:
         errors.append("density_stride must be >= 1")
 

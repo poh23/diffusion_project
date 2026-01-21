@@ -136,6 +136,7 @@ def run_simulation(
     compute_density=False,
     density_print_every=None,
     density_stride=1,
+    out_format="npz",
 ):
     config = SimulationConfig(
         n_particles=n_particles,
@@ -164,6 +165,7 @@ def run_simulation(
         compute_density=compute_density,
         density_print_every=density_print_every,
         density_stride=density_stride,
+        out_format=out_format,
     )
 
     validate_config(config)
@@ -326,6 +328,7 @@ def run_simulation(
         chunk_steps=config.chunk_steps,
         density_method="voronoi_2d" if config.compute_density else None,
         density_stride=config.density_stride if config.compute_density else None,
+        out_format=config.out_format,
         elapsed_sec=elapsed,
         steps_per_sec=(config.steps / elapsed) if elapsed > 0 else None,
     )

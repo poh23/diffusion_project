@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .config import SimulationConfig, load_config_file
+from .io.h5 import save_h5
 from .io.npz import save_npz
 from .simulation import run_simulation
 
@@ -12,6 +13,12 @@ def _parse_args():
     parser = argparse.ArgumentParser(description="Run diffusion simulation and save NPZ output.")
     parser.add_argument("--config", type=Path, help="JSON config file matching SimulationConfig fields.")
     parser.add_argument("--out", type=Path, help="Output .npz path (default: data/sim_<timestamp>.npz).")
+    parser.add_argument(
+        "--out-format",
+        choices=["npz", "h5", "hdf5"],
+        default=None,
+        help="Output format for default naming (npz, h5, or hdf5).",
+    )
 
     parser.add_argument("--n-particles", type=int)
     parser.add_argument("--k", type=float)
@@ -74,6 +81,7 @@ def _config_from_args(args) -> SimulationConfig:
         "compute_density": args.compute_density,
         "density_print_every": args.density_print_every,
         "density_stride": args.density_stride,
+        "out_format": args.out_format,
     }
 
     overrides = {k: v for k, v in overrides.items() if v is not None}
@@ -97,9 +105,13 @@ def main():
             f"{config.method}_N{config.n_particles}_steps{config.steps}_"
             f"dt{config.dt}_k{config.k}_rtol{config.rtol}_atol{config.atol}"
         )
-        out_path = Path("data") / date_dir / f"{stem}.npz"
+        suffix = ".npz" if config.out_format == "npz" else f".{config.out_format}"
+        out_path = Path("data") / date_dir / f"{stem}{suffix}"
 
-    save_npz(out_path, sim)
+    if out_path.suffix.lower() in {".h5", ".hdf5"}:
+        save_h5(out_path, sim)
+    else:
+        save_npz(out_path, sim)
 
 
 if __name__ == "__main__":
