@@ -51,6 +51,10 @@ def run_rk23_dynamic(
     record=True,
     method="RK23",
     return_stats=False,
+    diffusion=False,
+    diffusion_coeff=0.0,
+    diffusion_seed=None,
+    diffusion_noise_var=1.0,
 ):
     """
     Adaptive RK23 (or RK45) integrator with optional callback and recording.
@@ -89,6 +93,14 @@ def run_rk23_dynamic(
         Integrator class to use (default RK23).
     return_stats : bool
         If True, also return a stats dict with nfev and step counts.
+    diffusion : bool
+        If True, add a stochastic displacement after each accepted step.
+    diffusion_coeff : float
+        Diffusion constant D used in the stochastic step.
+    diffusion_seed : int or None
+        RNG seed for the diffusion term. None uses non-deterministic entropy.
+    diffusion_noise_var : float
+        Variance of the Gaussian noise used in the diffusion step (per component).
     """
     n = r0.shape[0]
     t0, tf = t_span
@@ -98,11 +110,16 @@ def run_rk23_dynamic(
     metric_every = max(1, int(metric_every))
     coupling = v0 * (l ** (k + 1))
     tiny = 1e-300
-    using_sampling = sample_dt is not None
+    use_diffusion = bool(diffusion) and diffusion_coeff != 0.0 and diffusion_noise_var != 0.0
+    using_sampling = sample_dt is not None and not use_diffusion
+    record_min_dt = sample_dt if use_diffusion and sample_dt is not None else None
+    diffusion_rng = np.random.default_rng(diffusion_seed) if use_diffusion else None
+    diffusion_noise_scale = np.sqrt(diffusion_noise_var) if diffusion_noise_var > 0.0 else 0.0
 
-    if using_sampling:
+    if sample_dt is not None:
         if sample_dt <= 0.0:
             raise ValueError("sample_dt must be > 0")
+    if using_sampling:
         if sample_count is None:
             sample_count = int(np.floor((tf - t0) / sample_dt)) + 1
         if sample_count < 0:
@@ -182,6 +199,14 @@ def run_rk23_dynamic(
         r_view = solver.y.reshape((n, 2))
         t_curr = solver.t
         y_curr = solver.y
+        dt_step = t_curr - t_prev
+
+        if use_diffusion:
+            if dt_step > 0.0:
+                noise = diffusion_rng.normal(0.0, 1.0, size=(n, 2))
+                if diffusion_noise_scale != 1.0:
+                    noise *= diffusion_noise_scale
+                r_view += np.sqrt(2.0 * diffusion_coeff * dt_step) * noise
 
         if callback is not None:
             callback(solver.t, r_view, solver)
@@ -199,11 +224,19 @@ def run_rk23_dynamic(
                 energy[sample_idx] = compute_energy_numba(r_sample, k, v0, l, r_floor)
                 std[sample_idx] = compute_std_numba(r_sample)
                 sample_idx += 1
-        elif record and (step_count % metric_every == 0):
-            times.append(solver.t)
-            positions.append(r_view.copy())
-            energy.append(compute_energy_numba(r_view, k, v0, l, r_floor))
-            std.append(compute_std_numba(r_view))
+        elif record:
+            should_record = False
+            if record_min_dt is not None:
+                if dt_step >= record_min_dt:
+                    should_record = True
+            elif step_count % metric_every == 0:
+                should_record = True
+
+            if should_record:
+                times.append(solver.t)
+                positions.append(r_view.copy())
+                energy.append(compute_energy_numba(r_view, k, v0, l, r_floor))
+                std.append(compute_std_numba(r_view))
 
         t_prev = t_curr
         y_prev = y_curr.copy()

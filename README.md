@@ -69,9 +69,21 @@ RK23 adaptive options
 - `--rk23-sample-count`: Number of samples for RK23 output (optional).
 - `--rk23-status-every-steps`: Update rk23 progress status every N accepted steps.
 - `--rk23-status-every-sec`: Update rk23 progress status every N seconds.
+- `--diffusion`: Enable stochastic diffusion step (rk23 only).
+- `--diffusion-coeff`: Diffusion constant `D` used in the stochastic step.
+- `--diffusion-seed`: RNG seed for the diffusion term.
+- `--diffusion-noise-var`: Variance of the Gaussian noise used in the diffusion step.
 
 If `rk23_sample_dt` and `rk23_sample_count` are not set, RK23 returns data at
 accepted solver steps (no interpolation).
+When diffusion is enabled, interpolation is disabled; if `rk23_sample_dt` is set it
+records only accepted steps with `dt >= rk23_sample_dt`.
+
+RK23 diffusion example:
+
+```bash
+python simulate.py --method rk23 --steps 500 --dt 1e-3 --diffusion --diffusion-coeff 0.05 --diffusion-seed 123
+```
 
 Density post-processing
 -----------------------
@@ -125,7 +137,11 @@ All CLI options map to fields in `SimulationConfig`. Example:
   "rtol": 1e-6,
   "atol": 1e-6,
   "rk23_sample_dt": 1e-3,
-  "rk23_sample_count": 500
+  "rk23_sample_count": 500,
+  "diffusion": true,
+  "diffusion_coeff": 0.05,
+  "diffusion_seed": 123,
+  "diffusion_noise_var": 1.0
 }
 ```
 
@@ -135,8 +151,9 @@ Notes
 - `k=0` uses the logarithmic potential energy (limit of the power-law form).
 - For RK23, sampling is optional and controlled by `rk23_sample_dt` and
   `rk23_sample_count`.
+- RK23 diffusion adds a post-step stochastic displacement when `--diffusion` is enabled.
 
 Future tasks
 ------------
 
-- Add an optional post-step stochastic callback for RK23 (apply a random process after each accepted deterministic step).
+- (none)

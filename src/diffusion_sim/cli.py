@@ -43,7 +43,21 @@ def _parse_args():
     parser.add_argument("--rk23-sample-count", type=int, help="Number of samples for rk23 output (optional).")
     parser.add_argument("--rk23-status-every-steps", type=int, help="Update rk23 progress status every N accepted steps.")
     parser.add_argument("--rk23-status-every-sec", type=float, help="Update rk23 progress status every N seconds.")
-    parser.add_argument("--compute-density", action="store_true", help="Compute Voronoi density/radii (post-process).")
+    parser.add_argument(
+        "--diffusion",
+        action="store_true",
+        default=None,
+        help="Enable stochastic diffusion step (rk23 only).",
+    )
+    parser.add_argument("--diffusion-coeff", type=float, help="Diffusion constant D for rk23 diffusion.")
+    parser.add_argument("--diffusion-seed", type=int, help="RNG seed for rk23 diffusion.")
+    parser.add_argument("--diffusion-noise-var", type=float, help="Gaussian noise variance for rk23 diffusion.")
+    parser.add_argument(
+        "--compute-density",
+        action="store_true",
+        default=None,
+        help="Compute Voronoi density/radii (post-process).",
+    )
     parser.add_argument("--density-print-every", type=int, help="Print progress every N steps during density computation.")
     parser.add_argument("--density-stride", type=int, help="Compute density every N steps (default 1 = every step).")
     return parser.parse_args()
@@ -78,6 +92,10 @@ def _config_from_args(args) -> SimulationConfig:
         "rk23_sample_count": args.rk23_sample_count,
         "rk23_status_every_steps": args.rk23_status_every_steps,
         "rk23_status_every_sec": args.rk23_status_every_sec,
+        "diffusion": args.diffusion,
+        "diffusion_coeff": args.diffusion_coeff,
+        "diffusion_seed": args.diffusion_seed,
+        "diffusion_noise_var": args.diffusion_noise_var,
         "compute_density": args.compute_density,
         "density_print_every": args.density_print_every,
         "density_stride": args.density_stride,
@@ -101,9 +119,12 @@ def main():
         out_path = args.out
     else:
         date_dir = time.strftime("%Y%m%d")
+        diffusion_tag = ""
+        if config.diffusion:
+            diffusion_tag = f"_diff_D{config.diffusion_coeff}"
         stem = (
             f"{config.method}_N{config.n_particles}_steps{config.steps}_"
-            f"dt{config.dt}_k{config.k}_rtol{config.rtol}_atol{config.atol}"
+            f"dt{config.dt}_k{config.k}_rtol{config.rtol}_atol{config.atol}{diffusion_tag}"
         )
         suffix = ".npz" if config.out_format == "npz" else f".{config.out_format}"
         out_path = Path("data") / date_dir / f"{stem}{suffix}"

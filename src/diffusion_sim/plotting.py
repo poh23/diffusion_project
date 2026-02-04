@@ -50,8 +50,13 @@ def plot_std(sim, show_theory=True, k=None, v0=None, l=None):
     can_theory = (k is not None) and (v0 is not None) and (l is not None)
     if show_theory and can_theory:
         gamma = 1.0 / (k + 2.0)
-        theo = (v0 * (l ** (k + 1)) * t) ** gamma
+        theo = (50* t) ** gamma
         plt.plot(t, theo, "--", linewidth=1, label="Theory (no diffusion)")
+        if meta.get("diffusion", True):
+            D = meta.get("diffusion_coeff", 0.0)
+            theo_diff = (2.0 * D * t) ** 0.5
+            plt.plot(t, theo_diff, ":",
+                     linewidth=1, label="Diffusion theory")
 
     elif show_theory and not can_theory:
         print("Note: k/v0/l not found in file metadata -> skipping theory curves.")

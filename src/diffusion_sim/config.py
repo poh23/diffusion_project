@@ -40,6 +40,11 @@ class SimulationConfig:
     rk23_sample_count: int | None = None
     rk23_status_every_steps: int | None = 50
     rk23_status_every_sec: float | None = 1.0
+    # stochastic diffusion (rk23 only)
+    diffusion: bool = False
+    diffusion_coeff: float = 0.0
+    diffusion_seed: int | None = None
+    diffusion_noise_var: float = 1.0
     # optional density computation (post-process, SciPy Voronoi)
     compute_density: bool = False
     density_print_every: int | None = None
@@ -91,6 +96,12 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append("rk23_status_every_steps must be >= 0 when set")
     if config.rk23_status_every_sec is not None and config.rk23_status_every_sec < 0.0:
         errors.append("rk23_status_every_sec must be >= 0 when set")
+    if config.diffusion_coeff < 0.0:
+        errors.append("diffusion_coeff must be >= 0")
+    if config.diffusion_noise_var < 0.0:
+        errors.append("diffusion_noise_var must be >= 0")
+    if config.diffusion and config.method != "rk23":
+        errors.append("diffusion is only supported with method='rk23'")
 
     if errors:
         raise ValueError("Invalid SimulationConfig: " + "; ".join(errors))
