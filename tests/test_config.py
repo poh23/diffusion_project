@@ -10,13 +10,18 @@ from diffusion_sim.config import SimulationConfig, validate_config
 
 
 class TestConfigValidation(unittest.TestCase):
-    def test_rejects_non_positive_dt(self):
-        config = SimulationConfig(dt=0.0)
+    def test_rejects_non_positive_t_duration(self):
+        config = SimulationConfig(t_duration=0.0)
         with self.assertRaises(ValueError):
             validate_config(config)
 
-    def test_rejects_non_positive_steps(self):
-        config = SimulationConfig(steps=0)
+    def test_rejects_non_positive_save_every(self):
+        config = SimulationConfig(save_every=0.0)
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
+    def test_dop853_requires_save_every(self):
+        config = SimulationConfig(method="dop853", save_every=None)
         with self.assertRaises(ValueError):
             validate_config(config)
 

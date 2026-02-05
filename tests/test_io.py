@@ -18,9 +18,9 @@ class TestIO(unittest.TestCase):
             k=1.0,
             v0=1.0,
             l=1.0,
-            dt=0.01,
-            steps=3,
-            method="rk2",
+            t_duration=0.02,
+            save_every=0.01,
+            method="rk23",
             seed=0,
             r_floor=1e-12,
         )

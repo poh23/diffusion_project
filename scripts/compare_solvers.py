@@ -100,14 +100,12 @@ def plot_divergence_pair(sim_a, sim_b, *, title="Solver Error Relative to Spacin
     return fig, ax
 
 
-def plot_divergence_sweep(experiments, *, title="RK4 vs DOP853 (sweep)",
+def plot_divergence_sweep(experiments, *, title="RK23 vs DOP853 (sweep)",
                           t_max=None, save_path=None, show=True, alpha_band=0.15,
-                          save_fresh=False, out_dir="data",
-                          compute_density_default=False, density_print_every_default=None,
-                          density_stride_default=1):
+                          save_fresh=False, out_dir="data"):
     """
     experiments: list of dicts.
-      mode="fresh": runs simulate.py twice (solver_a + solver_b)
+      mode="fresh": runs the simulation twice (solver_a + solver_b)
       mode="files": loads two npz files
     """
     if save_fresh:
@@ -127,17 +125,10 @@ def plot_divergence_sweep(experiments, *, title="RK4 vs DOP853 (sweep)",
 
         elif mode == "fresh":
             fresh_kwargs = dict(exp)
-            compute_density_val = fresh_kwargs.pop("compute_density", compute_density_default)
-            density_print_every_val = fresh_kwargs.pop("density_print_every", density_print_every_default)
-            density_stride_val = fresh_kwargs.pop("density_stride", density_stride_default)
-
             sim_a, sim_b = run_comparison_fresh(
                 **fresh_kwargs,
                 save_fresh=save_fresh,
                 out_dir=out_dir,
-                compute_density=compute_density_val,
-                density_print_every=density_print_every_val,
-                density_stride=density_stride_val,
             )
 
         else:
@@ -199,7 +190,7 @@ def _stem_from_exp(exp):
 # ============================================================
 
 def create_comparison_video(sim_a, sim_b, filename="solver_comparison.mp4", step=10,
-                            label_a="RK4", label_b="DOP853"):
+                            label_a="RK23", label_b="DOP853"):
     r_a = np.asarray(sim_a["positions"])[::step]
     r_b = np.asarray(sim_b["positions"])[::step]
 
@@ -254,7 +245,7 @@ def embed_mp4(path, width=600, embed=True):
 
 
 def animate_comparison_mp4(sim_a, sim_b, filename="solver_comparison.mp4", step=10,
-                           label_a="RK4", label_b="DOP853", embed=True, width=600):
+                           label_a="RK23", label_b="DOP853", embed=True, width=600):
     path = create_comparison_video(sim_a, sim_b, filename=filename, step=step,
                                    label_a=label_a, label_b=label_b)
     return embed_mp4(path, width=width, embed=embed)
@@ -270,35 +261,24 @@ def run_comparison_fresh(
     k=1.0, v0=1.0, l=1.0, r_floor=1e-1,
     seed_init=1,
     chunk_steps=5000,
-    print_every_chunks=1,
     rtol=1e-6,
     atol=1e-6,
-    solver_a="rk4",
+    solver_a="rk23",
     solver_b="dop853",
-    rk23_sample_dt=None,
-    rk23_sample_count=None,
     mode="fresh",
     label=None,
     save_fresh=False,
     out_dir="data",
-    compute_density=False,
-    density_print_every=None,
-    density_stride=1,
 ):
+    t_duration = dt * steps
     print(f"Running {solver_a}: N={N}, dt={dt}, steps={steps}, k={k}, r_floor={r_floor}")
     sim_a = run_simulation(
         n_particles=N, k=k, v0=v0, l=l,
-        dt=dt, steps=steps,
+        t_duration=t_duration, save_every=dt,
         method=solver_a,
         seed=seed_init,
         r_floor=r_floor,
         chunk_steps=chunk_steps,
-        print_every_chunks=print_every_chunks,
-        rk23_sample_dt=rk23_sample_dt,
-        rk23_sample_count=rk23_sample_count,
-        compute_density=compute_density,
-        density_print_every=density_print_every,
-        density_stride=density_stride,
     )
 
     if save_fresh:
@@ -313,19 +293,13 @@ def run_comparison_fresh(
     print(f"Running {solver_b}: N={N}, dt={dt}, steps={steps}, k={k}, r_floor={r_floor}")
     sim_b = run_simulation(
         n_particles=N, k=k, v0=v0, l=l,
-        dt=dt, steps=steps,
+        t_duration=t_duration, save_every=dt,
         method=solver_b,
         seed=seed_init,
         r_floor=r_floor,
         chunk_steps=chunk_steps,
-        print_every_chunks=print_every_chunks,
         rtol=rtol,
         atol=atol,
-        rk23_sample_dt=rk23_sample_dt,
-        rk23_sample_count=rk23_sample_count,
-        compute_density=compute_density,
-        density_print_every=density_print_every,
-        density_stride=density_stride,
     )
 
     if save_fresh:
@@ -353,15 +327,12 @@ def _load_experiments_config(path: Path):
 def _parse_args():
     parser = argparse.ArgumentParser(description="Compare solvers and optionally plot/save results.")
     parser.add_argument("--config", type=Path, required=True, help="JSON file with list of experiment dicts.")
-    parser.add_argument("--title", default="RK4 vs DOP853 (sweep)", help="Plot title.")
+    parser.add_argument("--title", default="RK23 vs DOP853 (sweep)", help="Plot title.")
     parser.add_argument("--t-max", type=float, help="Clip times to this value.")
     parser.add_argument("--save-path", type=Path, help="Path to save the plot PNG.")
     parser.add_argument("--out-dir", type=Path, default=Path("data"), help="Directory to save fresh runs when enabled.")
     parser.add_argument("--save-fresh", action="store_true", help="Save fresh runs to disk.")
     parser.add_argument("--no-show", action="store_true", help="Do not display the plot.")
-    parser.add_argument("--compute-density", action="store_true", help="Compute Voronoi density/radii for fresh runs.")
-    parser.add_argument("--density-print-every", type=int, help="Print progress every N steps during density calc (fresh).")
-    parser.add_argument("--density-stride", type=int, help="Compute density every N steps (fresh).")
     return parser.parse_args()
 
 
@@ -377,9 +348,6 @@ def main():
         show=not args.no_show,
         save_fresh=args.save_fresh,
         out_dir=args.out_dir,
-        compute_density_default=args.compute_density,
-        density_print_every_default=args.density_print_every,
-        density_stride_default=args.density_stride,
     )
 
 

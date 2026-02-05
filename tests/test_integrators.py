@@ -26,7 +26,6 @@ class TestIntegrators(unittest.TestCase):
             rtol=1e-9,
             atol=1e-12,
             chunk_steps=10,
-            print_every_chunks=0,
         )
 
         self.assertEqual(times.shape[0], 1)

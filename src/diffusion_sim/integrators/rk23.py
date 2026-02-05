@@ -47,14 +47,18 @@ def run_rk23_dynamic(
     metric_every=1,
     sample_dt=None,
     sample_count=None,
+    sample_t0=None,
     callback=None,
+    record_hook=None,
     record=True,
     method="RK23",
     return_stats=False,
     diffusion=False,
     diffusion_coeff=0.0,
     diffusion_seed=None,
+    diffusion_rng_state=None,
     diffusion_noise_var=1.0,
+    stop_condition=None,
 ):
     """
     Adaptive RK23 (or RK45) integrator with optional callback and recording.
@@ -83,10 +87,16 @@ def run_rk23_dynamic(
         Record metrics/positions every N accepted steps (1 = every step).
     sample_dt : float or None
         If set, record on a uniform time grid with spacing sample_dt using interpolation.
+        When diffusion is enabled, interpolation is disabled and the first accepted step
+        at or after each sample_dt interval is recorded instead.
     sample_count : int or None
         Number of samples to record when sample_dt is set. If None, it is derived from t_span.
+    sample_t0 : float or None
+        Reference time for the sampling grid when sample_dt is set. Defaults to t_span[0].
     callback : callable or None
         Called after each accepted step: callback(t, r, solver).
+    record_hook : callable or None
+        Called on each recorded sample: record_hook(t, r, energy, std).
     record : bool
         If True, return time/position/metric histories (accepted steps or sampled grid).
     method : "RK23" | "RK45"
@@ -99,8 +109,12 @@ def run_rk23_dynamic(
         Diffusion constant D used in the stochastic step.
     diffusion_seed : int or None
         RNG seed for the diffusion term. None uses non-deterministic entropy.
+    diffusion_rng_state : dict or None
+        RNG state to restore for the diffusion term (overrides diffusion_seed).
     diffusion_noise_var : float
         Variance of the Gaussian noise used in the diffusion step (per component).
+    stop_condition : callable or None
+        If provided, called as stop_condition(t, r, solver). If it returns True, integration stops.
     """
     n = r0.shape[0]
     t0, tf = t_span
@@ -112,9 +126,21 @@ def run_rk23_dynamic(
     tiny = 1e-300
     use_diffusion = bool(diffusion) and diffusion_coeff != 0.0 and diffusion_noise_var != 0.0
     using_sampling = sample_dt is not None and not use_diffusion
-    record_min_dt = sample_dt if use_diffusion and sample_dt is not None else None
-    diffusion_rng = np.random.default_rng(diffusion_seed) if use_diffusion else None
+    record_schedule_dt = sample_dt if use_diffusion and sample_dt is not None else None
+    base_sample_t0 = t0 if sample_t0 is None else sample_t0
+    if record_schedule_dt is not None:
+        n_intervals = int(np.floor((t0 - base_sample_t0) / record_schedule_dt))
+        next_save_t = base_sample_t0 + (n_intervals + 1) * record_schedule_dt
+    else:
+        next_save_t = None
+    if use_diffusion:
+        diffusion_rng = np.random.default_rng(diffusion_seed)
+        if diffusion_rng_state is not None:
+            diffusion_rng.bit_generator.state = diffusion_rng_state
+    else:
+        diffusion_rng = None
     diffusion_noise_scale = np.sqrt(diffusion_noise_var) if diffusion_noise_var > 0.0 else 0.0
+    do_record = record or record_hook is not None
 
     if sample_dt is not None:
         if sample_dt <= 0.0:
@@ -149,23 +175,33 @@ def run_rk23_dynamic(
     )
 
     if using_sampling and record:
-        times = t0 + sample_dt * np.arange(sample_count, dtype=np.float64)
+        times = base_sample_t0 + sample_dt * np.arange(sample_count, dtype=np.float64)
         positions = np.empty((sample_count, n, 2), dtype=np.float64)
         energy = np.empty(sample_count, dtype=np.float64)
         std = np.empty(sample_count, dtype=np.float64)
         sample_idx = 0
     else:
-        times = []
+        if using_sampling and do_record:
+            times = base_sample_t0 + sample_dt * np.arange(sample_count, dtype=np.float64)
+            sample_idx = 0
+        else:
+            times = []
+            sample_idx = None
         positions = []
         energy = []
         std = []
 
-    if record and not using_sampling:
+    if do_record and not using_sampling:
         r_view = solver.y.reshape((n, 2))
-        times.append(solver.t)
-        positions.append(r_view.copy())
-        energy.append(compute_energy_numba(r_view, k, v0, l, r_floor))
-        std.append(compute_std_numba(r_view))
+        e0 = compute_energy_numba(r_view, k, v0, l, r_floor)
+        s0 = compute_std_numba(r_view)
+        if record:
+            times.append(solver.t)
+            positions.append(r_view.copy())
+            energy.append(e0)
+            std.append(s0)
+        if record_hook is not None:
+            record_hook(solver.t, r_view.copy(), e0, s0)
 
     step_count = 0
     last_d_min = None
@@ -173,12 +209,17 @@ def run_rk23_dynamic(
     t_prev = solver.t
     y_prev = solver.y.copy()
 
-    if using_sampling and record:
+    if using_sampling and do_record:
         while sample_idx < sample_count and times[sample_idx] <= t_prev:
             r_sample = y_prev.reshape((n, 2))
-            positions[sample_idx] = r_sample
-            energy[sample_idx] = compute_energy_numba(r_sample, k, v0, l, r_floor)
-            std[sample_idx] = compute_std_numba(r_sample)
+            e_sample = compute_energy_numba(r_sample, k, v0, l, r_floor)
+            s_sample = compute_std_numba(r_sample)
+            if record:
+                positions[sample_idx] = r_sample
+                energy[sample_idx] = e_sample
+                std[sample_idx] = s_sample
+            if record_hook is not None:
+                record_hook(times[sample_idx], r_sample.copy(), e_sample, s_sample)
             sample_idx += 1
 
     while solver.status == "running":
@@ -211,7 +252,7 @@ def run_rk23_dynamic(
         if callback is not None:
             callback(solver.t, r_view, solver)
 
-        if record and using_sampling:
+        if do_record and using_sampling:
             while sample_idx < sample_count and times[sample_idx] <= t_curr:
                 t_sample = times[sample_idx]
                 if t_curr > t_prev:
@@ -220,23 +261,41 @@ def run_rk23_dynamic(
                     alpha = 0.0
                 y_sample = y_prev + alpha * (y_curr - y_prev)
                 r_sample = y_sample.reshape((n, 2))
-                positions[sample_idx] = r_sample
-                energy[sample_idx] = compute_energy_numba(r_sample, k, v0, l, r_floor)
-                std[sample_idx] = compute_std_numba(r_sample)
+                e_sample = compute_energy_numba(r_sample, k, v0, l, r_floor)
+                s_sample = compute_std_numba(r_sample)
+                if record:
+                    positions[sample_idx] = r_sample
+                    energy[sample_idx] = e_sample
+                    std[sample_idx] = s_sample
+                if record_hook is not None:
+                    record_hook(t_sample, r_sample.copy(), e_sample, s_sample)
                 sample_idx += 1
-        elif record:
+        elif do_record:
             should_record = False
-            if record_min_dt is not None:
-                if dt_step >= record_min_dt:
+            if record_schedule_dt is not None:
+                if t_curr >= next_save_t:
                     should_record = True
             elif step_count % metric_every == 0:
                 should_record = True
 
             if should_record:
-                times.append(solver.t)
-                positions.append(r_view.copy())
-                energy.append(compute_energy_numba(r_view, k, v0, l, r_floor))
-                std.append(compute_std_numba(r_view))
+                e_now = compute_energy_numba(r_view, k, v0, l, r_floor)
+                s_now = compute_std_numba(r_view)
+                if record:
+                    times.append(solver.t)
+                    positions.append(r_view.copy())
+                    energy.append(e_now)
+                    std.append(s_now)
+                if record_hook is not None:
+                    record_hook(solver.t, r_view.copy(), e_now, s_now)
+                if next_save_t is not None:
+                    while next_save_t <= t_curr:
+                        next_save_t += record_schedule_dt
+
+        if stop_condition is not None:
+            if stop_condition(t_curr, r_view, solver):
+                solver.status = "finished"
+                break
 
         t_prev = t_curr
         y_prev = y_curr.copy()
@@ -265,6 +324,8 @@ def run_rk23_dynamic(
         status=solver.status,
         message=last_msg,
     )
+    if use_diffusion and diffusion_rng is not None:
+        stats["rng_state"] = diffusion_rng.bit_generator.state
 
     if return_stats:
         return r_final, positions, energy, std, times, stats

@@ -20,17 +20,26 @@ def run_dop853_chunked(
     rtol=1e-6,
     atol=1e-6,
     chunk_steps=5000,
-    print_every_chunks=1,
+    record_hook=None,
+    return_arrays=True,
+    skip_first=False,
+    stop_condition=None,
 ):
     """
     Chunked DOP853 integration so we can print progress.
     We sample the solution on a dt grid (t_eval).
     """
     n = r0.shape[0]
-    positions = np.empty((steps, n, 2), dtype=np.float64)
-    times = np.empty(steps, dtype=np.float64)
-    energy = np.empty(steps, dtype=np.float64)
-    std = np.empty(steps, dtype=np.float64)
+    if return_arrays:
+        positions = np.empty((steps, n, 2), dtype=np.float64)
+        times = np.empty(steps, dtype=np.float64)
+        energy = np.empty(steps, dtype=np.float64)
+        std = np.empty(steps, dtype=np.float64)
+    else:
+        positions = np.empty((0, n, 2), dtype=np.float64)
+        times = np.empty(0, dtype=np.float64)
+        energy = np.empty(0, dtype=np.float64)
+        std = np.empty(0, dtype=np.float64)
 
     def rhs(t, y):
         r = y.reshape((n, 2))
@@ -40,12 +49,14 @@ def run_dop853_chunked(
     y = r0.reshape(-1).copy()
     t = t0
     idx = 0
-    show_progress = print_every_chunks is None or print_every_chunks > 0
-    pbar = tqdm(total=steps, desc="dop853", unit="step", disable=not show_progress)
+    pbar = tqdm(total=steps, desc="dop853", unit="step")
 
     while idx < steps:
         m = min(chunk_steps, steps - idx)
-        t_eval = t + dt * np.arange(m)
+        if skip_first and idx == 0:
+            t_eval = t + dt * np.arange(1, m + 1)
+        else:
+            t_eval = t + dt * np.arange(m)
         t_span = (t, t + m * dt)
 
         sol = solve_ivp(
@@ -65,13 +76,21 @@ def run_dop853_chunked(
         r_hist = sol.y.T.reshape((m, n, 2))
         t_hist = sol.t
 
-        positions[idx : idx + m] = r_hist
-        times[idx : idx + m] = t_hist
-
         # metrics
+        energy_chunk = np.empty(m, dtype=np.float64)
+        std_chunk = np.empty(m, dtype=np.float64)
         for i in range(m):
-            energy[idx + i] = compute_energy_numba(r_hist[i], k, v0, l, r_floor)
-            std[idx + i] = compute_std_numba(r_hist[i])
+            energy_chunk[i] = compute_energy_numba(r_hist[i], k, v0, l, r_floor)
+            std_chunk[i] = compute_std_numba(r_hist[i])
+
+        if return_arrays:
+            positions[idx : idx + m] = r_hist
+            times[idx : idx + m] = t_hist
+            energy[idx : idx + m] = energy_chunk
+            std[idx : idx + m] = std_chunk
+
+        if record_hook is not None:
+            record_hook(t_hist, r_hist, energy_chunk, std_chunk)
 
         # prepare next chunk
         if sol.sol is None:
@@ -81,10 +100,18 @@ def run_dop853_chunked(
         t += m * dt
         idx += m
 
-        if show_progress:
-            pbar.update(m)
+        pbar.update(m)
+
+        if stop_condition is not None:
+            if stop_condition(t, y):
+                break
+
+    if return_arrays and idx < steps:
+        positions = positions[:idx]
+        times = times[:idx]
+        energy = energy[:idx]
+        std = std[:idx]
 
     r_final = y.reshape((n, 2))
-    if show_progress:
-        pbar.close()
+    pbar.close()
     return r_final, positions, energy, std, times

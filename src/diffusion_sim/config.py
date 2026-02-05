@@ -19,15 +19,20 @@ class SimulationConfig:
     r_floor: float = DEFAULT_R_FLOOR
     init_radius: float = 1.0
     # integration / time
-    dt: float = 0.01
-    steps: int = 200
     t0: float = 0.0
-    method: str = "rk4"  # "rk4" or "rk2" or "rk23" or "dop853"
+    t_duration: float = 1.0
+    save_every: float | None = None
+    method: str = "rk23"  # "rk23" or "dop853"
     seed: int = 0
     out_format: str = "npz"
     # progress / chunking
     chunk_steps: int = 0
-    print_every_chunks: int = 1
+    # batching / resume
+    batch_every: float | None = None
+    target_batch_mb: float | None = None
+    max_wall_time: float | None = None
+    resume_from: str | None = None
+    resume_force: bool = False
     # dop853 tolerances
     rtol: float = 1e-6
     atol: float = 1e-6
@@ -36,19 +41,11 @@ class SimulationConfig:
     max_step_global: float = np.inf
     eta: float = 0.05
     recompute_every: int = 10
-    rk23_sample_dt: float | None = None
-    rk23_sample_count: int | None = None
-    rk23_status_every_steps: int | None = 50
-    rk23_status_every_sec: float | None = 1.0
     # stochastic diffusion (rk23 only)
     diffusion: bool = False
     diffusion_coeff: float = 0.0
     diffusion_seed: int | None = None
     diffusion_noise_var: float = 1.0
-    # optional density computation (post-process, SciPy Voronoi)
-    compute_density: bool = False
-    density_print_every: int | None = None
-    density_stride: int = 1  # compute every n steps when density is enabled
 
 
 def load_config_file(config_path: Path) -> SimulationConfig:
@@ -57,6 +54,49 @@ def load_config_file(config_path: Path) -> SimulationConfig:
 
     if "out_format" not in data and "out-format" in data:
         data["out_format"] = data["out-format"]
+    if "resume_from" not in data and "resume-from" in data:
+        data["resume_from"] = data["resume-from"]
+    if "resume_force" not in data and "resume-force" in data:
+        data["resume_force"] = data["resume-force"]
+    if "batch_every" not in data and "batch-every" in data:
+        data["batch_every"] = data["batch-every"]
+    if "target_batch_mb" not in data and "target-batch-mb" in data:
+        data["target_batch_mb"] = data["target-batch-mb"]
+    if "max_wall_time" not in data and "max-wall-time" in data:
+        data["max_wall_time"] = data["max-wall-time"]
+
+    if "save_every" not in data and "rk23_sample_dt" in data:
+        data["save_every"] = data["rk23_sample_dt"]
+    if "save_every" not in data and "dt" in data:
+        data["save_every"] = data["dt"]
+
+    if "t_duration" not in data:
+        if "t_end" in data:
+            t0 = data.get("t0", 0.0)
+            data["t_duration"] = data["t_end"] - t0
+        elif "dt" in data and "steps" in data:
+            data["t_duration"] = data["dt"] * data["steps"]
+
+    for legacy_key in (
+        "out-format",
+        "resume-from",
+        "resume-force",
+        "batch-every",
+        "target-batch-mb",
+        "max-wall-time",
+        "rk23_sample_dt",
+        "rk23_sample_count",
+        "rk23_status_every_steps",
+        "rk23_status_every_sec",
+        "dt",
+        "steps",
+        "t_end",
+        "compute_density",
+        "density_print_every",
+        "density_stride",
+        "print_every_chunks",
+    ):
+        data.pop(legacy_key, None)
 
     allowed_keys = set(SimulationConfig.__dataclass_fields__.keys())
     filtered = {k: v for k, v in data.items() if k in allowed_keys}
@@ -72,36 +112,41 @@ def validate_config(config: SimulationConfig) -> None:
 
     if config.n_particles <= 0:
         errors.append("n_particles must be > 0")
-    if config.dt <= 0.0:
-        errors.append("dt must be > 0")
-    if config.steps <= 0:
-        errors.append("steps must be > 0")
     if config.r_floor < 0.0:
         errors.append("r_floor must be >= 0")
     # k=0 is supported (log potential), but keep other checks intact
     if config.init_radius <= 0.0:
         errors.append("init_radius must be > 0")
-    if config.method not in ("rk2", "rk4", "rk23", "dop853"):
-        errors.append("method must be one of: rk2, rk4, rk23, dop853")
+    if config.method not in ("rk23", "dop853"):
+        errors.append("method must be one of: rk23, dop853")
+    if config.t_duration <= 0.0:
+        errors.append("t_duration must be > 0")
     if config.out_format not in ("npz", "h5", "hdf5"):
         errors.append("out_format must be one of: npz, h5, hdf5")
-    if config.density_stride <= 0:
-        errors.append("density_stride must be >= 1")
-
-    if config.rk23_sample_dt is not None and config.rk23_sample_dt <= 0.0:
-        errors.append("rk23_sample_dt must be > 0 when set")
-    if config.rk23_sample_count is not None and config.rk23_sample_count < 0:
-        errors.append("rk23_sample_count must be >= 0 when set")
-    if config.rk23_status_every_steps is not None and config.rk23_status_every_steps < 0:
-        errors.append("rk23_status_every_steps must be >= 0 when set")
-    if config.rk23_status_every_sec is not None and config.rk23_status_every_sec < 0.0:
-        errors.append("rk23_status_every_sec must be >= 0 when set")
+    if config.save_every is not None and config.save_every <= 0.0:
+        errors.append("save_every must be > 0 when set")
+    if config.batch_every is not None and config.batch_every <= 0.0:
+        errors.append("batch_every must be > 0 when set")
+    if config.target_batch_mb is not None and config.target_batch_mb <= 0.0:
+        errors.append("target_batch_mb must be > 0 when set")
+    if config.max_wall_time is not None and config.max_wall_time <= 0.0:
+        errors.append("max_wall_time must be > 0 when set")
     if config.diffusion_coeff < 0.0:
         errors.append("diffusion_coeff must be >= 0")
     if config.diffusion_noise_var < 0.0:
         errors.append("diffusion_noise_var must be >= 0")
     if config.diffusion and config.method != "rk23":
         errors.append("diffusion is only supported with method='rk23'")
+    if config.method == "dop853" and config.save_every is None:
+        errors.append("save_every must be set for method='dop853'")
+    if (
+        config.batch_every is not None
+        or config.target_batch_mb is not None
+        or config.max_wall_time is not None
+        or config.resume_from is not None
+    ):
+        if config.out_format not in ("h5", "hdf5"):
+            errors.append("batching/resume requires out_format 'h5' or 'hdf5'")
 
     if errors:
         raise ValueError("Invalid SimulationConfig: " + "; ".join(errors))

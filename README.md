@@ -4,35 +4,35 @@ diffusion-project
 Simulation arguments and parameters
 -----------------------------------
 
-This project runs simulations via `simulate.py`. You can configure runs with
+This project runs simulations via the package CLI. You can configure runs with
 command-line arguments or a JSON config file.
 
 Command-line usage
 ------------------
 
-Basic:
+Basic (module):
 
 ```bash
-python simulate.py --method rk4 --n-particles 100 --steps 500 --dt 1e-3
+python -m diffusion_sim.cli --method rk23 --n-particles 100 --t-duration 0.5 --save-every 1e-3
 ```
 
 Installed CLI (after `pip install -e .`):
 
 ```bash
-diffusion-sim --method rk4 --n-particles 100 --steps 500 --dt 1e-3
+diffusion-sim --method rk23 --n-particles 100 --t-duration 0.5 --save-every 1e-3
 ```
 
 Config file:
 
 ```bash
-python simulate.py --config config.json
+python -m diffusion_sim.cli --config config.json
 ```
 
 Core arguments
 --------------
 
 - `--config`: Path to a JSON config file (matches `SimulationConfig` fields).
-- `--out`: Output `.npz` path (default: `data/YYYYMMDD/<method>_N<N>_steps<steps>_dt<dt>_k<k>_rtol<rtol>_atol<atol>.npz`). Use `.h5` or `.hdf5` to save in HDF5 format.
+- `--out`: Output `.npz` path (default: `data/YYYYMMDD/<method>_N<N>_t<T>_k<k>_rtol<rtol>_atol<atol>_save<save_every>.npz`). Use `.h5` or `.hdf5` to save in HDF5 format.
 - `--out-format`: Controls the default output suffix when `--out` is not provided (`npz`, `h5`, or `hdf5`). Can also be set in JSON config as `out_format`.
 - `--n-particles`: Number of particles (`n_particles`).
 - `--k`: Power-law exponent.
@@ -40,17 +40,11 @@ Core arguments
 - `--l`: Length scale (usually `1.0`).
 - `--r-floor`: Hard distance floor for interactions.
 - `--init-radius`: Initial disk radius for particle placement.
-- `--dt`: Time step (fixed-step methods) or requested sampling interval for RK23 when sampling is enabled.
-- `--steps`: Number of steps (fixed-step) or sample count for RK23 when sampling is enabled.
 - `--t0`: Initial time.
-- `--method`: One of `rk2`, `rk4`, `rk23`, `dop853`.
+- `--t-duration`: Total integration time.
+- `--save-every`: Sample interval for output (optional for RK23; required for DOP853). If omitted, RK23 records accepted steps.
+- `--method`: One of `rk23`, `dop853`.
 - `--seed`: RNG seed for initialization.
-
-Progress / chunking
--------------------
-
-- `--chunk-steps`: Chunk size for progress updates.
-- `--print-every-chunks`: Print progress every N chunks (`0` to disable).
 
 Adaptive tolerances
 -------------------
@@ -65,32 +59,41 @@ RK23 adaptive options
 - `--max-step-global`: Global max step size.
 - `--eta`: Safety factor for distance-based max step cap.
 - `--recompute-every`: Recompute distance-based cap every N accepted steps.
-- `--rk23-sample-dt`: Sample interval for RK23 output (optional).
-- `--rk23-sample-count`: Number of samples for RK23 output (optional).
-- `--rk23-status-every-steps`: Update rk23 progress status every N accepted steps.
-- `--rk23-status-every-sec`: Update rk23 progress status every N seconds.
 - `--diffusion`: Enable stochastic diffusion step (rk23 only).
 - `--diffusion-coeff`: Diffusion constant `D` used in the stochastic step.
 - `--diffusion-seed`: RNG seed for the diffusion term.
 - `--diffusion-noise-var`: Variance of the Gaussian noise used in the diffusion step.
 
-If `rk23_sample_dt` and `rk23_sample_count` are not set, RK23 returns data at
-accepted solver steps (no interpolation).
-When diffusion is enabled, interpolation is disabled; if `rk23_sample_dt` is set it
-records only accepted steps with `dt >= rk23_sample_dt`.
+If `save_every` is not set, RK23 returns data at accepted solver steps (no interpolation).
+When diffusion is enabled, interpolation is disabled; if `save_every` is set it
+records the first accepted step at or after each interval (no interpolation).
 
 RK23 diffusion example:
 
 ```bash
-python simulate.py --method rk23 --steps 500 --dt 1e-3 --diffusion --diffusion-coeff 0.05 --diffusion-seed 123
+python -m diffusion_sim.cli --method rk23 --t-duration 0.5 --save-every 1e-3 --diffusion --diffusion-coeff 0.05 --diffusion-seed 123
+```
+
+Batching / resume (HDF5 only)
+-----------------------------
+
+- `--batch-every`: Sim-time interval between batch flushes.
+- `--target-batch-mb`: Target batch size in MB.
+- `--max-wall-time`: Stop after this many seconds (checkpoint and exit).
+- `--resume-from`: Resume from an existing HDF5 file.
+- `--resume-force`: Resume even if config mismatch.
+
+Example (batch + resume):
+
+```bash
+diffusion-sim --config config_rk23.json --out data/run.h5 --batch-every 0.5 --target-batch-mb 64
+diffusion-sim --resume-from data/run.h5 --t-duration 10.0
 ```
 
 Density post-processing
 -----------------------
 
-- `--compute-density`: Compute Voronoi density/radii after integration.
-- `--density-print-every`: Print progress every N steps during density computation.
-- `--density-stride`: Compute density every N steps (default 1 = every step).
+Density is computed as a post-process step using the standalone CLI below.
 
 Standalone density CLI
 ----------------------
@@ -131,17 +134,17 @@ All CLI options map to fields in `SimulationConfig`. Example:
   "v0": 1.0,
   "l": 1.0,
   "r_floor": 1e-12,
-  "dt": 1e-3,
-  "steps": 500,
+  "t_duration": 0.5,
+  "save_every": 1e-3,
   "method": "rk23",
   "rtol": 1e-6,
   "atol": 1e-6,
-  "rk23_sample_dt": 1e-3,
-  "rk23_sample_count": 500,
   "diffusion": true,
   "diffusion_coeff": 0.05,
   "diffusion_seed": 123,
-  "diffusion_noise_var": 1.0
+  "diffusion_noise_var": 1.0,
+  "batch_every": 0.5,
+  "target_batch_mb": 64.0
 }
 ```
 
@@ -149,9 +152,10 @@ Notes
 -----
 
 - `k=0` uses the logarithmic potential energy (limit of the power-law form).
-- For RK23, sampling is optional and controlled by `rk23_sample_dt` and
-  `rk23_sample_count`.
+- For RK23, sampling is optional and controlled by `save_every`.
+- For DOP853, `save_every` is required to define the output sampling grid.
 - RK23 diffusion adds a post-step stochastic displacement when `--diffusion` is enabled.
+- Batching/resume is supported only with `out_format` set to `h5` or `hdf5`.
 
 Future tasks
 ------------
