@@ -26,6 +26,20 @@ def _parse_args():
     parser.add_argument("--l", type=float)
     parser.add_argument("--r-floor", type=float, help="Hard distance floor for interactions.")
     parser.add_argument("--init-radius", type=float, help="Initial disk radius for particle placement.")
+    parser.add_argument(
+        "--charge-values",
+        nargs=2,
+        type=float,
+        metavar=("Q1", "Q2"),
+        help="Charge values for two populations (positive).",
+    )
+    parser.add_argument(
+        "--charge-counts",
+        nargs=2,
+        type=int,
+        metavar=("N1", "N2"),
+        help="Particle counts for the two charge populations (sum to n_particles).",
+    )
     parser.add_argument("--t0", type=float)
     parser.add_argument("--t-duration", type=float, help="Total integration time.")
     parser.add_argument(
@@ -75,6 +89,8 @@ def _config_from_args(args) -> SimulationConfig:
         "l": args.l,
         "r_floor": args.r_floor,
         "init_radius": args.init_radius,
+        "charge_values": args.charge_values,
+        "charge_counts": args.charge_counts,
         "t0": args.t0,
         "t_duration": args.t_duration,
         "save_every": args.save_every,
@@ -128,12 +144,18 @@ def main():
         diffusion_tag = ""
         if config.diffusion:
             diffusion_tag = f"_diff_D{config.diffusion_coeff}"
+        charge_tag = ""
+        if config.charge_values is not None and config.charge_counts is not None:
+            q1, q2 = config.charge_values
+            n1, n2 = config.charge_counts
+            charge_tag = f"_q{q1}-{q2}_n{n1}-{n2}"
         save_tag = ""
         if config.save_every is not None:
             save_tag = f"_save{config.save_every}"
         stem = (
             f"{config.method}_N{config.n_particles}_t{config.t_duration}_"
-            f"k{config.k}_rtol{config.rtol}_atol{config.atol}{save_tag}{diffusion_tag}"
+            f"k{config.k}_rtol{config.rtol}_atol{config.atol}"
+            f"{charge_tag}{save_tag}{diffusion_tag}"
         )
         suffix = ".npz" if config.out_format == "npz" else f".{config.out_format}"
         out_path = Path("data") / date_dir / f"{stem}{suffix}"

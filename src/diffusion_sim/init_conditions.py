@@ -1,14 +1,23 @@
 import numpy as np
 
-__all__ = ["init_positions_jittered_disk"]
+__all__ = ["init_positions_jittered_disk", "init_charges_two_populations"]
 
 
-def init_positions_jittered_disk(n, radius=1.0, jitter=0.05, seed=None, min_dist=None, max_attempts=None):
+def init_positions_jittered_disk(
+    n,
+    radius=1.0,
+    jitter=0.05,
+    seed=None,
+    min_dist=None,
+    max_attempts=None,
+    rng=None,
+):
     """
     Sample points uniformly over a disk (area-uniform), with a small angular/radial jitter.
     Enforces a minimum pair distance when min_dist > 0, and raises if packing is too dense.
     """
-    rng = np.random.default_rng(seed)
+    if rng is None:
+        rng = np.random.default_rng(seed)
 
     if min_dist is None:
         min_dist = 0.5 * radius / np.sqrt(max(1, n))
@@ -92,3 +101,22 @@ def init_positions_jittered_disk(n, radius=1.0, jitter=0.05, seed=None, min_dist
             count += 1
 
     return positions
+
+
+def init_charges_two_populations(n, values, counts, rng=None):
+    """
+    Initialize two positive charge populations and mix them uniformly.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    if len(values) != 2 or len(counts) != 2:
+        raise ValueError("values and counts must have length 2")
+    if counts[0] + counts[1] != n:
+        raise ValueError("counts must sum to n")
+
+    charges = np.empty(n, dtype=np.float64)
+    charges[: counts[0]] = values[0]
+    charges[counts[0] :] = values[1]
+    perm = rng.permutation(n)
+    return charges[perm]

@@ -40,6 +40,8 @@ Core arguments
 - `--l`: Length scale (usually `1.0`).
 - `--r-floor`: Hard distance floor for interactions.
 - `--init-radius`: Initial disk radius for particle placement.
+- `--charge-values`: Charge values for two populations (positive).
+- `--charge-counts`: Particle counts for the two charge populations (sum to `n_particles`).
 - `--t0`: Initial time.
 - `--t-duration`: Total integration time.
 - `--save-every`: Sample interval for output (optional for RK23; required for DOP853). If omitted, RK23 records accepted steps.
@@ -137,6 +139,8 @@ All CLI options map to fields in `SimulationConfig`. Example:
   "t_duration": 0.5,
   "save_every": 1e-3,
   "method": "rk23",
+  "charge_values": [1.0, 2.0],
+  "charge_counts": [60, 40],
   "rtol": 1e-6,
   "atol": 1e-6,
   "diffusion": true,
@@ -152,6 +156,7 @@ Notes
 -----
 
 - `k=0` uses the logarithmic potential energy (limit of the power-law form).
+- Pairwise forces/energy are scaled by `q_i * q_j` when charges are provided.
 - For RK23, sampling is optional and controlled by `save_every`.
 - For DOP853, `save_every` is required to define the output sampling grid.
 - RK23 diffusion adds a post-step stochastic displacement when `--diffusion` is enabled.

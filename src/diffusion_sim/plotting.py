@@ -92,7 +92,26 @@ def save_mp4(sim, out_path="simulation.mp4", fps=30, dpi=120, step=10, marker_si
     ax.grid(True, alpha=0.3)
 
     # init with first frame so scatter has correct size
-    colors = plt.cm.jet(np.linspace(0, 1, n))
+    colors = None
+    charges = sim.get("charges")
+    if charges is not None:
+        charges = np.asarray(charges)
+        if charges.shape[0] == n:
+            unique = np.unique(charges)
+            palette = ["#1f77b4", "#d62728"]
+            if unique.size <= len(palette):
+                color_map = {val: palette[i] for i, val in enumerate(unique)}
+                colors = np.array([color_map[val] for val in charges], dtype=object)
+            else:
+                c_min = float(np.min(charges))
+                c_max = float(np.max(charges))
+                if c_max > c_min:
+                    norm = (charges - c_min) / (c_max - c_min)
+                    colors = plt.cm.jet(norm)
+
+    if colors is None:
+        colors = plt.cm.jet(np.linspace(0, 1, n))
+
     particles = ax.scatter(r_view[0, :, 0], r_view[0, :, 1],
                            s=marker_size, c=colors)
 

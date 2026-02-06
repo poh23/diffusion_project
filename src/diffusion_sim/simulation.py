@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 import h5py
 
 from .config import DEFAULT_R_FLOOR, SimulationConfig, validate_config
-from .init_conditions import init_positions_jittered_disk
+from .init_conditions import init_positions_jittered_disk, init_charges_two_populations
 from .integrators.rk23 import run_rk23_dynamic
 from .integrators.dop853 import run_dop853_chunked
 from .io.h5_batch import (
@@ -51,6 +51,10 @@ def _config_fingerprint(config: SimulationConfig) -> str:
         save_every=config.save_every,
         t0=config.t0,
     )
+    if config.charge_values is not None:
+        payload["charge_values"] = config.charge_values
+    if config.charge_counts is not None:
+        payload["charge_counts"] = config.charge_counts
     encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -121,6 +125,16 @@ class _BatchAccumulator:
                 self.next_batch_t += self.batch_every
 
 
+def _init_charges(n_particles, charge_values, charge_counts, rng):
+    if charge_values is None and charge_counts is None:
+        return np.ones(n_particles, dtype=np.float64)
+    if charge_values is None or charge_counts is None:
+        raise ValueError("charge_values and charge_counts must be set together")
+    values = (float(charge_values[0]), float(charge_values[1]))
+    counts = (int(charge_counts[0]), int(charge_counts[1]))
+    return init_charges_two_populations(n_particles, values, counts, rng=rng)
+
+
 # ----------------------------
 # Public API
 # ----------------------------
@@ -135,6 +149,8 @@ def run_simulation(
     seed=0,
     r_floor=DEFAULT_R_FLOOR,
     init_radius=1.0,
+    charge_values=None,
+    charge_counts=None,
     t0=0.0,
     t_duration=1.0,
     save_every=None,
@@ -168,6 +184,8 @@ def run_simulation(
         l=l,
         r_floor=r_floor,
         init_radius=init_radius,
+        charge_values=charge_values,
+        charge_counts=charge_counts,
         t0=t0,
         t_duration=t_duration,
         save_every=save_every,
@@ -214,6 +232,7 @@ def run_simulation(
         resumed = False
         rng_state = None
         t_start_sim = config.t0
+        charges = None
 
         if config.resume_from is not None:
             if not out_path.exists():
@@ -222,10 +241,14 @@ def run_simulation(
                 saved_hash = h5.attrs.get("config_hash")
                 if isinstance(saved_hash, bytes):
                     saved_hash = saved_hash.decode("utf-8")
+                if "charges" in h5:
+                    charges = h5["charges"][()]
             if saved_hash is not None and saved_hash != config_hash and not config.resume_force:
                 raise ValueError("Config mismatch for resume (use resume_force to override).")
 
             resume_state = load_h5_resume_state(out_path)
+            if charges is None and config.charge_values is not None and config.charge_counts is not None:
+                raise ValueError("Resume file missing charges dataset for charged simulation.")
             if resume_state["completed"] and resume_state["t_current"] >= config.t0 + config.t_duration:
                 return dict(
                     positions=np.empty((0, config.n_particles, 2), dtype=np.float64),
@@ -233,6 +256,9 @@ def run_simulation(
                     energy=np.empty(0, dtype=np.float64),
                     std=np.empty(0, dtype=np.float64),
                     final_positions=resume_state["y_current"],
+                    charges=charges
+                    if charges is not None
+                    else np.ones(config.n_particles, dtype=np.float64),
                     density=None,
                     radii=None,
                     meta=dict(
@@ -246,6 +272,8 @@ def run_simulation(
                         seed=config.seed,
                         r_floor=config.r_floor,
                         init_radius=config.init_radius,
+                        charge_values=config.charge_values,
+                        charge_counts=config.charge_counts,
                         t0=config.t0,
                         rtol=config.rtol,
                         atol=config.atol,
@@ -270,11 +298,19 @@ def run_simulation(
             rng_state = resume_state["rng_state"]
             resumed = True
         else:
+            rng = np.random.default_rng(config.seed)
             r0 = init_positions_jittered_disk(
                 config.n_particles,
                 radius=config.init_radius,
-                seed=config.seed,
+                rng=rng,
             )
+            charges = _init_charges(config.n_particles, config.charge_values, config.charge_counts, rng)
+
+        if charges is None:
+            if config.charge_values is None and config.charge_counts is None:
+                charges = np.ones(config.n_particles, dtype=np.float64)
+            else:
+                raise ValueError("Resume file missing charges dataset for charged simulation.")
 
         t_end = config.t0 + config.t_duration
         if t_start_sim >= t_end:
@@ -284,6 +320,7 @@ def run_simulation(
                 energy=np.empty(0, dtype=np.float64),
                 std=np.empty(0, dtype=np.float64),
                 final_positions=r0,
+                charges=charges,
                 density=None,
                 radii=None,
                 meta=dict(
@@ -297,6 +334,8 @@ def run_simulation(
                     seed=config.seed,
                     r_floor=config.r_floor,
                     init_radius=config.init_radius,
+                    charge_values=config.charge_values,
+                    charge_counts=config.charge_counts,
                     t0=config.t0,
                     rtol=config.rtol,
                     atol=config.atol,
@@ -323,6 +362,14 @@ def run_simulation(
             chunk_len = max(1, int(target_bytes // bytes_per_frame))
 
         h5 = open_h5_batch(out_path, config.n_particles, resume=resumed, chunk_len=chunk_len)
+        if "charges" not in h5:
+            h5.create_dataset("charges", data=charges, dtype=np.float64)
+        else:
+            stored = h5["charges"][()]
+            if stored.shape != charges.shape or not np.allclose(stored, charges):
+                if not config.resume_force:
+                    raise ValueError("Charges mismatch for resume (use resume_force to override).")
+                h5["charges"][...] = charges
 
         last_state = dict(t=t_start_sim, r=r0.copy())
         last_stats = {}
@@ -391,7 +438,8 @@ def run_simulation(
                 config.v0,
                 config.l,
                 config.r_floor,
-                (t_start_sim, t_end),
+                charges=charges,
+                t_span=(t_start_sim, t_end),
                 rtol=config.rtol,
                 atol=config.atol,
                 first_step=config.first_step,
@@ -439,9 +487,10 @@ def run_simulation(
                 config.v0,
                 config.l,
                 config.r_floor,
-                dt,
-                steps,
-                t_start_sim,
+                charges=charges,
+                dt=dt,
+                steps=steps,
+                t0=t_start_sim,
                 rtol=config.rtol,
                 atol=config.atol,
                 chunk_steps=config.chunk_steps,
@@ -478,6 +527,8 @@ def run_simulation(
             seed=config.seed,
             r_floor=config.r_floor,
             init_radius=config.init_radius,
+            charge_values=config.charge_values,
+            charge_counts=config.charge_counts,
             t0=config.t0,
             rtol=config.rtol,
             atol=config.atol,
@@ -513,17 +564,20 @@ def run_simulation(
             energy=np.empty(0, dtype=np.float64),
             std=np.empty(0, dtype=np.float64),
             final_positions=r_final,
+            charges=charges,
             density=None,
             radii=None,
             meta=meta,
             saved_path=str(out_path),
         )
 
+    rng = np.random.default_rng(config.seed)
     r0 = init_positions_jittered_disk(
         config.n_particles,
         radius=config.init_radius,
-        seed=config.seed,
+        rng=rng,
     )
+    charges = _init_charges(config.n_particles, config.charge_values, config.charge_counts, rng)
 
     sample_count = None
     if config.save_every is not None:
@@ -558,7 +612,8 @@ def run_simulation(
             config.v0,
             config.l,
             config.r_floor,
-            t_span,
+            charges=charges,
+            t_span=t_span,
             rtol=config.rtol,
             atol=config.atol,
             first_step=config.first_step,
@@ -587,9 +642,10 @@ def run_simulation(
             config.v0,
             config.l,
             config.r_floor,
-            dt,
-            steps,
-            config.t0,
+            charges=charges,
+            dt=dt,
+            steps=steps,
+            t0=config.t0,
             rtol=config.rtol,
             atol=config.atol,
             chunk_steps=config.chunk_steps,
@@ -613,6 +669,8 @@ def run_simulation(
         seed=config.seed,
         r_floor=config.r_floor,
         init_radius=config.init_radius,
+        charge_values=config.charge_values,
+        charge_counts=config.charge_counts,
         t0=config.t0,
         rtol=config.rtol if config.method in ("dop853", "rk23") else None,
         atol=config.atol if config.method in ("dop853", "rk23") else None,
@@ -643,6 +701,7 @@ def run_simulation(
         energy=pe_hist,
         std=std_hist,
         final_positions=r_final,
+        charges=charges,
         density=density,
         radii=radii,
         meta=meta,

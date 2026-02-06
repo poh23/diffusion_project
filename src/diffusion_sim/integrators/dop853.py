@@ -24,12 +24,15 @@ def run_dop853_chunked(
     return_arrays=True,
     skip_first=False,
     stop_condition=None,
+    charges=None,
 ):
     """
     Chunked DOP853 integration so we can print progress.
     We sample the solution on a dt grid (t_eval).
     """
     n = r0.shape[0]
+    if charges is None:
+        charges = np.ones(n, dtype=np.float64)
     if return_arrays:
         positions = np.empty((steps, n, 2), dtype=np.float64)
         times = np.empty(steps, dtype=np.float64)
@@ -43,7 +46,7 @@ def run_dop853_chunked(
 
     def rhs(t, y):
         r = y.reshape((n, 2))
-        vel = compute_velocity_overdamped(r, k, v0, l, r_floor)
+        vel = compute_velocity_overdamped(r, k, v0, l, r_floor, charges)
         return vel.reshape(-1)
 
     y = r0.reshape(-1).copy()
@@ -80,7 +83,7 @@ def run_dop853_chunked(
         energy_chunk = np.empty(m, dtype=np.float64)
         std_chunk = np.empty(m, dtype=np.float64)
         for i in range(m):
-            energy_chunk[i] = compute_energy_numba(r_hist[i], k, v0, l, r_floor)
+            energy_chunk[i] = compute_energy_numba(r_hist[i], k, v0, l, r_floor, charges)
             std_chunk[i] = compute_std_numba(r_hist[i])
 
         if return_arrays:

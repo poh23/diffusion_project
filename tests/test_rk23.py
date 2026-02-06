@@ -31,6 +31,7 @@ class TestRK23Adaptive(unittest.TestCase):
         rng = np.random.default_rng(0)
         n = 50
         r0 = rng.uniform(0.0, 1.0, size=(n, 2))
+        charges = np.ones(n, dtype=np.float64)
 
         r_final, positions, _, _, times = run_rk23_dynamic(
             r0,
@@ -38,6 +39,7 @@ class TestRK23Adaptive(unittest.TestCase):
             v0=1.0,
             l=1.0,
             r_floor=1e-4,
+            charges=charges,
             t_span=(0.0, 0.1),
             rtol=1e-6,
             atol=1e-9,
@@ -56,6 +58,7 @@ class TestRK23Adaptive(unittest.TestCase):
         n = 50
         r0 = rng.uniform(0.0, 1.0, size=(n, 2))
         r_floor = 1e-4
+        charges = np.ones(n, dtype=np.float64)
 
         _, positions, _, _, _ = run_rk23_dynamic(
             r0,
@@ -63,6 +66,7 @@ class TestRK23Adaptive(unittest.TestCase):
             v0=1.0,
             l=1.0,
             r_floor=r_floor,
+            charges=charges,
             t_span=(0.0, 1e-4),
             rtol=1e-6,
             atol=1e-9,

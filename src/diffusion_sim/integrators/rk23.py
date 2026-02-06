@@ -36,6 +36,7 @@ def run_rk23_dynamic(
     v0,
     l=1.0,
     r_floor=0.0,
+    charges=None,
     t_span=(0.0, 1.0),
     *,
     rtol=1e-6,
@@ -71,6 +72,8 @@ def run_rk23_dynamic(
         Interaction parameters; coupling = v0 * l**(k+1).
     r_floor : float
         Hard floor for pair distances to avoid singularities.
+    charges : (N,) ndarray or None
+        Per-particle charge values. None defaults to all ones.
     t_span : (t0, tf)
         Integration time span.
     rtol, atol : float
@@ -122,7 +125,11 @@ def run_rk23_dynamic(
     max_step = np.inf if max_step_global is None else max_step_global
     recompute_every = max(1, int(recompute_every))
     metric_every = max(1, int(metric_every))
+    if charges is None:
+        charges = np.ones(n, dtype=np.float64)
     coupling = v0 * (l ** (k + 1))
+    charge_scale = np.max(np.abs(charges)) if n > 0 else 1.0
+    coupling *= charge_scale * charge_scale
     tiny = 1e-300
     use_diffusion = bool(diffusion) and diffusion_coeff != 0.0 and diffusion_noise_var != 0.0
     using_sampling = sample_dt is not None and not use_diffusion
@@ -153,7 +160,7 @@ def run_rk23_dynamic(
 
     def rhs(t, y):
         r = y.reshape((n, 2))
-        vel = compute_velocity_overdamped(r, k, v0, l, r_floor)
+        vel = compute_velocity_overdamped(r, k, v0, l, r_floor, charges)
         return vel.reshape(-1)
 
     method_upper = str(method).upper()
@@ -193,7 +200,7 @@ def run_rk23_dynamic(
 
     if do_record and not using_sampling:
         r_view = solver.y.reshape((n, 2))
-        e0 = compute_energy_numba(r_view, k, v0, l, r_floor)
+        e0 = compute_energy_numba(r_view, k, v0, l, r_floor, charges)
         s0 = compute_std_numba(r_view)
         if record:
             times.append(solver.t)
@@ -212,7 +219,7 @@ def run_rk23_dynamic(
     if using_sampling and do_record:
         while sample_idx < sample_count and times[sample_idx] <= t_prev:
             r_sample = y_prev.reshape((n, 2))
-            e_sample = compute_energy_numba(r_sample, k, v0, l, r_floor)
+            e_sample = compute_energy_numba(r_sample, k, v0, l, r_floor, charges)
             s_sample = compute_std_numba(r_sample)
             if record:
                 positions[sample_idx] = r_sample
@@ -261,7 +268,7 @@ def run_rk23_dynamic(
                     alpha = 0.0
                 y_sample = y_prev + alpha * (y_curr - y_prev)
                 r_sample = y_sample.reshape((n, 2))
-                e_sample = compute_energy_numba(r_sample, k, v0, l, r_floor)
+                e_sample = compute_energy_numba(r_sample, k, v0, l, r_floor, charges)
                 s_sample = compute_std_numba(r_sample)
                 if record:
                     positions[sample_idx] = r_sample
@@ -279,7 +286,7 @@ def run_rk23_dynamic(
                 should_record = True
 
             if should_record:
-                e_now = compute_energy_numba(r_view, k, v0, l, r_floor)
+                e_now = compute_energy_numba(r_view, k, v0, l, r_floor, charges)
                 s_now = compute_std_numba(r_view)
                 if record:
                     times.append(solver.t)

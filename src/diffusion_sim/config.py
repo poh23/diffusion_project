@@ -18,6 +18,8 @@ class SimulationConfig:
     l: float = 1.0
     r_floor: float = DEFAULT_R_FLOOR
     init_radius: float = 1.0
+    charge_values: tuple[float, float] | None = None
+    charge_counts: tuple[int, int] | None = None
     # integration / time
     t0: float = 0.0
     t_duration: float = 1.0
@@ -64,6 +66,10 @@ def load_config_file(config_path: Path) -> SimulationConfig:
         data["target_batch_mb"] = data["target-batch-mb"]
     if "max_wall_time" not in data and "max-wall-time" in data:
         data["max_wall_time"] = data["max-wall-time"]
+    if "charge_values" not in data and "charge-values" in data:
+        data["charge_values"] = data["charge-values"]
+    if "charge_counts" not in data and "charge-counts" in data:
+        data["charge_counts"] = data["charge-counts"]
 
     if "save_every" not in data and "rk23_sample_dt" in data:
         data["save_every"] = data["rk23_sample_dt"]
@@ -84,6 +90,8 @@ def load_config_file(config_path: Path) -> SimulationConfig:
         "batch-every",
         "target-batch-mb",
         "max-wall-time",
+        "charge-values",
+        "charge-counts",
         "rk23_sample_dt",
         "rk23_sample_count",
         "rk23_status_every_steps",
@@ -97,6 +105,11 @@ def load_config_file(config_path: Path) -> SimulationConfig:
         "print_every_chunks",
     ):
         data.pop(legacy_key, None)
+
+    if "charge_values" in data and data["charge_values"] is not None:
+        data["charge_values"] = tuple(float(v) for v in data["charge_values"])
+    if "charge_counts" in data and data["charge_counts"] is not None:
+        data["charge_counts"] = tuple(data["charge_counts"])
 
     allowed_keys = set(SimulationConfig.__dataclass_fields__.keys())
     filtered = {k: v for k, v in data.items() if k in allowed_keys}
@@ -147,6 +160,37 @@ def validate_config(config: SimulationConfig) -> None:
     ):
         if config.out_format not in ("h5", "hdf5"):
             errors.append("batching/resume requires out_format 'h5' or 'hdf5'")
+    if (config.charge_values is None) ^ (config.charge_counts is None):
+        errors.append("charge_values and charge_counts must be set together")
+    if config.charge_values is not None:
+        if len(config.charge_values) != 2:
+            errors.append("charge_values must have length 2")
+        else:
+            for value in config.charge_values:
+                if value <= 0.0:
+                    errors.append("charge_values must be positive")
+                    break
+    if config.charge_counts is not None:
+        if len(config.charge_counts) != 2:
+            errors.append("charge_counts must have length 2")
+        else:
+            total = 0
+            for count in config.charge_counts:
+                try:
+                    count_val = float(count)
+                except (TypeError, ValueError):
+                    errors.append("charge_counts must be integers")
+                    break
+                if not count_val.is_integer():
+                    errors.append("charge_counts must be integers")
+                    break
+                count_int = int(count_val)
+                if count_int <= 0:
+                    errors.append("charge_counts must be positive")
+                    break
+                total += count_int
+            if total != config.n_particles:
+                errors.append("charge_counts must sum to n_particles")
 
     if errors:
         raise ValueError("Invalid SimulationConfig: " + "; ".join(errors))

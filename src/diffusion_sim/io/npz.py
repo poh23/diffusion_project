@@ -28,6 +28,7 @@ def load_npz(path):
     final_positions = _pick(data, "final_positions", "r_final")
     density = _pick(data, "density")
     radii = _pick(data, "radii")
+    charges = _pick(data, "charges")
 
     if positions is None:
         raise KeyError(f"{path}: couldn't find positions array. Keys = {data.files}")
@@ -59,6 +60,7 @@ def load_npz(path):
         energy=energy,
         std=std,
         final_positions=final_positions,
+        charges=charges,
         density=density,
         radii=radii,
         meta=meta,
@@ -85,6 +87,8 @@ def save_npz(out_path, sim_dict):
         arrays["density"] = sim_dict["density"]
     if sim_dict.get("radii") is not None:
         arrays["radii"] = sim_dict["radii"]
+    if sim_dict.get("charges") is not None:
+        arrays["charges"] = sim_dict["charges"]
 
     np.savez_compressed(
         out_path,

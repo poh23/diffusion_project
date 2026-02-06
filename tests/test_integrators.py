@@ -14,12 +14,14 @@ from diffusion_sim.integrators.dop853 import run_dop853_chunked
 class TestIntegrators(unittest.TestCase):
     def test_dop853_advances_final_state(self):
         r0 = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=np.float64)
+        charges = np.ones(r0.shape[0], dtype=np.float64)
         r_final, positions, _, _, times = run_dop853_chunked(
             r0,
             k=1.0,
             v0=1.0,
             l=1.0,
             r_floor=1e-12,
+            charges=charges,
             dt=0.1,
             steps=1,
             t0=0.0,
