@@ -14,6 +14,16 @@ __all__ = [
 ]
 
 
+def _json_default(obj):
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return str(obj)
+
+
 def _pack_state(state):
     if state is None:
         return None
@@ -92,7 +102,7 @@ def append_h5_batch(h5, positions, times, energy, std):
 
 
 def write_h5_meta(h5, meta, *, config_hash=None):
-    meta_json = json.dumps(meta)
+    meta_json = json.dumps(meta, default=_json_default)
     h5.attrs["meta_json"] = meta_json
     if config_hash is not None:
         h5.attrs["config_hash"] = config_hash

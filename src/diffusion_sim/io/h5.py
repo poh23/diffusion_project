@@ -7,6 +7,16 @@ import numpy as np
 __all__ = ["save_h5", "load_h5"]
 
 
+def _json_default(obj):
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return str(obj)
+
+
 def save_h5(out_path, sim_dict):
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -25,7 +35,7 @@ def save_h5(out_path, sim_dict):
         if sim_dict.get("radii") is not None:
             h5.create_dataset("radii", data=sim_dict["radii"], compression=None)
 
-        meta_json = json.dumps(sim_dict["meta"])
+        meta_json = json.dumps(sim_dict["meta"], default=_json_default)
         h5.attrs["meta_json"] = meta_json
 
     print(f"Saved: {out_path}")

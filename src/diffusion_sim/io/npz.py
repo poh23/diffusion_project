@@ -6,6 +6,16 @@ import numpy as np
 __all__ = ["load_npz", "save_npz"]
 
 
+def _json_default(obj):
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return str(obj)
+
+
 def _pick(data, *names):
     for name in names:
         if name in data.files:
@@ -69,7 +79,7 @@ def load_npz(path):
 
 
 def save_npz(out_path, sim_dict):
-    meta_json = json.dumps(sim_dict["meta"])
+    meta_json = json.dumps(sim_dict["meta"], default=_json_default)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
