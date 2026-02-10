@@ -9,7 +9,7 @@
   "t0": 0.0,
   "t_duration": 20,
   "save_every": 1e-3,
-  "seed": 1,
+  "seed": 5,
   "eta": 50.0,
   "batch_every": 0.5,
   "target_batch_mb": 64,
@@ -21,6 +21,6 @@
   "diffusion": true,
   "diffusion_coeff": 1.0,
   "diffusion_noise_var": 1.0,
-  "diffusion_seed": 1,
+  "diffusion_seed": 5,
   "out_format": "h5"
 }
