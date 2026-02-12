@@ -34,6 +34,8 @@ def _save_sim(path: Path, sim: dict, density: np.ndarray, radii: np.ndarray | No
     sim_out["density"] = density
     sim_out["radii"] = radii
     sim_out["meta"] = dict(sim.get("meta", {}) or {})
+    if sim.get("charges") is not None:
+        sim_out["meta"]["density_split_by_charge"] = True
     if stride is not None:
         sim_out["meta"]["density_stride"] = stride
 
@@ -72,10 +74,13 @@ def main():
         path = Path(path_str)
         sim = _load_sim(path)
         r_hist = sim["positions"]
+        charges = sim.get("charges")
         r_hist_sub = r_hist[:: args.stride]
         density_raw, radii_raw = compute_density_and_radius_series(
             r_hist_sub,
+            charges=charges,
             print_every=args.print_every,
+            split_by_charge=True,
         )
 
         total_steps = r_hist.shape[0]

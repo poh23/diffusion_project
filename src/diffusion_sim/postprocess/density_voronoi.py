@@ -34,28 +34,75 @@ def voronoi_density(points: np.ndarray) -> np.ndarray:
     return densities
 
 
-def compute_density_series(r_hist: np.ndarray, print_every: int | None = None) -> np.ndarray:
+def voronoi_density_by_charge(points: np.ndarray, charges: np.ndarray) -> np.ndarray:
+    """
+    Compute density per point with independent Voronoi tessellation per charge group.
+    Points in groups that cannot form a valid Voronoi diagram get density=0.
+    """
+    n = points.shape[0]
+    out = np.zeros(n, dtype=np.float64)
+    unique_charges = np.unique(charges)
+
+    for q in unique_charges:
+        mask = np.isclose(charges, q)
+        idx = np.flatnonzero(mask)
+        if idx.size < 4:
+            continue
+        try:
+            out[idx] = voronoi_density(points[idx])
+        except Exception:
+            # Degenerate groups (e.g. collinear points) are treated as zero density.
+            out[idx] = 0.0
+    return out
+
+
+def compute_density_series(
+    r_hist: np.ndarray,
+    charges: np.ndarray | None = None,
+    print_every: int | None = None,
+    split_by_charge: bool = True,
+) -> np.ndarray:
     """
     r_hist: (steps, n, 2)
     Returns density per particle per step: (steps, n), density = 1 / Voronoi cell area.
     """
     steps, n, _ = r_hist.shape
     out = np.zeros((steps, n), dtype=np.float64)
+    valid_charges = (
+        split_by_charge
+        and charges is not None
+        and np.asarray(charges).shape == (n,)
+    )
+    charge_arr = np.asarray(charges) if valid_charges else None
+
     for i in range(steps):
-        out[i] = voronoi_density(r_hist[i])
+        if charge_arr is None:
+            out[i] = voronoi_density(r_hist[i])
+        else:
+            out[i] = voronoi_density_by_charge(r_hist[i], charge_arr)
         if print_every and (i + 1) % print_every == 0:
             print(f"[density] processed step {i + 1}/{steps}")
     return out
 
 
-def compute_density_and_radius_series(r_hist: np.ndarray, print_every: int | None = None):
+def compute_density_and_radius_series(
+    r_hist: np.ndarray,
+    charges: np.ndarray | None = None,
+    print_every: int | None = None,
+    split_by_charge: bool = True,
+):
     """
     r_hist: (steps, n, 2)
     Returns:
       densities: (steps, n)  # 1 / Voronoi cell area (0 for unbounded cells)
       radii:     (steps, n)  # sqrt(x^2 + y^2) for each particle
     """
-    densities = compute_density_series(r_hist, print_every=print_every)
+    densities = compute_density_series(
+        r_hist,
+        charges=charges,
+        print_every=print_every,
+        split_by_charge=split_by_charge,
+    )
     radii = np.linalg.norm(r_hist, axis=2)
     return densities, radii
 
@@ -69,6 +116,8 @@ def save_with_density(
 ):
     meta = dict(sim["meta"])
     meta["density_method"] = "voronoi_2d"
+    if sim.get("charges") is not None:
+        meta["density_split_by_charge"] = True
     if density_stride is not None:
         meta["density_stride"] = density_stride
     meta_json = json.dumps(meta)
@@ -82,6 +131,8 @@ def save_with_density(
         "density": density,
         "meta_json": np.array(meta_json, dtype=object),
     }
+    if sim.get("charges") is not None:
+        arrays["charges"] = sim["charges"]
     if radii is not None:
         arrays["radii"] = radii
 
@@ -92,7 +143,12 @@ def save_with_density(
 def process_file(path: Path, overwrite: bool = False, suffix: str = "_with_density", include_radii: bool = True,
                  print_every: int | None = None):
     sim = load_npz(path)
-    densities, radii = compute_density_and_radius_series(sim["positions"], print_every=print_every)
+    densities, radii = compute_density_and_radius_series(
+        sim["positions"],
+        charges=sim.get("charges"),
+        print_every=print_every,
+        split_by_charge=True,
+    )
     if not include_radii:
         radii = None
 
