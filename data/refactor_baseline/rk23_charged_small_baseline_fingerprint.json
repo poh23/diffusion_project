@@ -1,0 +1,58 @@
+{
+  "artifact": "data/refactor_baseline/rk23_charged_small_baseline.npz",
+  "shapes": {
+    "positions": [
+      21,
+      20,
+      2
+    ],
+    "times": [
+      21
+    ],
+    "energy": [
+      21
+    ],
+    "std": [
+      21
+    ],
+    "final_positions": [
+      20,
+      2
+    ],
+    "charges": [
+      20
+    ]
+  },
+  "scalars": {
+    "time_start": 0.0,
+    "time_end": 0.2,
+    "energy_last": 165.62779310364152,
+    "std_last": 0.8121441685716378,
+    "positions_sum": -14.379604627391116,
+    "positions_abs_sum": 862.8847604433071
+  },
+  "hashes": {
+    "positions": "989329ea30a328e49965e27a28f68f56e0ba262c57c4080bab392160a1608932",
+    "times": "3d17e96c0a4b9723d061f06310d75ea30b79aee189bc76e478e4baebbfc1c129",
+    "energy": "9a4ba7d60969edac31a22c5da951098e3980e84f1854eec8a82371567a366b4e",
+    "std": "0687ee26713cc52932b1a2d6b19f6039443c2471f4987e73c86cd66257e67524",
+    "final_positions": "fd4478345e716c488291e34edd18e92844f947d212805fa1b4ca145f5dceb442",
+    "charges": "1473d791787d14caf143e6a8ec864c0f79568c763cab67def7fef3cc218840d8"
+  },
+  "meta_subset": {
+    "method": "rk23",
+    "seed": 123,
+    "diffusion_seed": 456,
+    "n_particles": 20,
+    "k": 1.0,
+    "save_every": 0.01,
+    "charge_values": [
+      1.0,
+      2.0
+    ],
+    "charge_counts": [
+      10,
+      10
+    ]
+  }
+}
