@@ -234,6 +234,42 @@ def run_simulation(
         t_start_sim = config.t0
         charges = None
 
+        def _build_meta(*, elapsed_sec, completed, rk23_stats, resumed_flag):
+            return dict(
+                n_particles=config.n_particles,
+                k=config.k,
+                v0=config.v0,
+                l=config.l,
+                t_duration=config.t_duration,
+                save_every=config.save_every,
+                method=config.method,
+                seed=config.seed,
+                r_floor=config.r_floor,
+                init_radius=config.init_radius,
+                charge_values=config.charge_values,
+                charge_counts=config.charge_counts,
+                t0=config.t0,
+                rtol=config.rtol,
+                atol=config.atol,
+                first_step=config.first_step if config.method == "rk23" else None,
+                max_step_global=config.max_step_global if config.method == "rk23" else None,
+                eta=config.eta if config.method == "rk23" else None,
+                recompute_every=config.recompute_every if config.method == "rk23" else None,
+                diffusion=config.diffusion if config.method == "rk23" else None,
+                diffusion_coeff=config.diffusion_coeff if config.method == "rk23" else None,
+                diffusion_seed=config.diffusion_seed if config.method == "rk23" else None,
+                diffusion_noise_var=config.diffusion_noise_var if config.method == "rk23" else None,
+                rk23_stats=rk23_stats if config.method == "rk23" else None,
+                batch_every=config.batch_every,
+                target_batch_mb=config.target_batch_mb,
+                max_wall_time=config.max_wall_time,
+                resume_from=str(out_path) if resumed_flag else None,
+                resumed=resumed_flag,
+                completed=completed,
+                out_format=config.out_format,
+                elapsed_sec=elapsed_sec,
+            )
+
         if config.resume_from is not None:
             if not out_path.exists():
                 raise FileNotFoundError(out_path)
@@ -261,35 +297,7 @@ def run_simulation(
                     else np.ones(config.n_particles, dtype=np.float64),
                     density=None,
                     radii=None,
-                    meta=dict(
-                        n_particles=config.n_particles,
-                        k=config.k,
-                        v0=config.v0,
-                        l=config.l,
-                        t_duration=config.t_duration,
-                        save_every=config.save_every,
-                        method=config.method,
-                        seed=config.seed,
-                        r_floor=config.r_floor,
-                        init_radius=config.init_radius,
-                        charge_values=config.charge_values,
-                        charge_counts=config.charge_counts,
-                        t0=config.t0,
-                        rtol=config.rtol,
-                        atol=config.atol,
-                        diffusion=config.diffusion,
-                        diffusion_coeff=config.diffusion_coeff,
-                        diffusion_seed=config.diffusion_seed,
-                        diffusion_noise_var=config.diffusion_noise_var,
-                        batch_every=config.batch_every,
-                        target_batch_mb=config.target_batch_mb,
-                        max_wall_time=config.max_wall_time,
-                        resume_from=str(out_path),
-                        resumed=True,
-                        completed=True,
-                        out_format=config.out_format,
-                        elapsed_sec=0.0,
-                    ),
+                    meta=_build_meta(elapsed_sec=0.0, completed=True, rk23_stats=None, resumed_flag=True),
                     saved_path=str(out_path),
                 )
 
@@ -323,35 +331,7 @@ def run_simulation(
                 charges=charges,
                 density=None,
                 radii=None,
-                meta=dict(
-                    n_particles=config.n_particles,
-                    k=config.k,
-                    v0=config.v0,
-                    l=config.l,
-                    t_duration=config.t_duration,
-                    save_every=config.save_every,
-                    method=config.method,
-                    seed=config.seed,
-                    r_floor=config.r_floor,
-                    init_radius=config.init_radius,
-                    charge_values=config.charge_values,
-                    charge_counts=config.charge_counts,
-                    t0=config.t0,
-                    rtol=config.rtol,
-                    atol=config.atol,
-                    diffusion=config.diffusion,
-                    diffusion_coeff=config.diffusion_coeff,
-                    diffusion_seed=config.diffusion_seed,
-                    diffusion_noise_var=config.diffusion_noise_var,
-                    batch_every=config.batch_every,
-                    target_batch_mb=config.target_batch_mb,
-                    max_wall_time=config.max_wall_time,
-                    resume_from=str(out_path),
-                    resumed=resumed,
-                    completed=True,
-                    out_format=config.out_format,
-                    elapsed_sec=0.0,
-                ),
+                meta=_build_meta(elapsed_sec=0.0, completed=True, rk23_stats=None, resumed_flag=resumed),
                 saved_path=str(out_path),
             )
 
@@ -373,6 +353,7 @@ def run_simulation(
 
         last_state = dict(t=t_start_sim, r=r0.copy())
         last_stats = {}
+        wall_start = time.perf_counter()
 
         def _on_flush(t_curr):
             write_h5_resume_state(
@@ -383,6 +364,14 @@ def run_simulation(
                 stats=last_stats,
                 completed=False,
             )
+            elapsed = time.perf_counter() - wall_start
+            meta_snapshot = _build_meta(
+                elapsed_sec=elapsed,
+                completed=False,
+                rk23_stats=last_stats if config.method == "rk23" else None,
+                resumed_flag=resumed,
+            )
+            write_h5_meta(h5, meta_snapshot, config_hash=config_hash)
             h5.flush()
 
         accumulator = _BatchAccumulator(
@@ -401,7 +390,6 @@ def run_simulation(
             desc=config.method,
             unit="t",
         )
-        wall_start = time.perf_counter()
         stopped_early = False
 
         def _stop_condition(t, r, solver):
@@ -516,39 +504,11 @@ def run_simulation(
         h5["final_positions"][...] = r_final
         elapsed = time.perf_counter() - wall_start
 
-        meta = dict(
-            n_particles=config.n_particles,
-            k=config.k,
-            v0=config.v0,
-            l=config.l,
-            t_duration=config.t_duration,
-            save_every=config.save_every,
-            method=config.method,
-            seed=config.seed,
-            r_floor=config.r_floor,
-            init_radius=config.init_radius,
-            charge_values=config.charge_values,
-            charge_counts=config.charge_counts,
-            t0=config.t0,
-            rtol=config.rtol,
-            atol=config.atol,
-            first_step=config.first_step if config.method == "rk23" else None,
-            max_step_global=config.max_step_global if config.method == "rk23" else None,
-            eta=config.eta if config.method == "rk23" else None,
-            recompute_every=config.recompute_every if config.method == "rk23" else None,
-            diffusion=config.diffusion if config.method == "rk23" else None,
-            diffusion_coeff=config.diffusion_coeff if config.method == "rk23" else None,
-            diffusion_seed=config.diffusion_seed if config.method == "rk23" else None,
-            diffusion_noise_var=config.diffusion_noise_var if config.method == "rk23" else None,
-            rk23_stats=last_stats if config.method == "rk23" else None,
-            batch_every=config.batch_every,
-            target_batch_mb=config.target_batch_mb,
-            max_wall_time=config.max_wall_time,
-            resume_from=str(out_path) if resumed else None,
-            resumed=resumed,
-            completed=completed,
-            out_format=config.out_format,
+        meta = _build_meta(
             elapsed_sec=elapsed,
+            completed=completed,
+            rk23_stats=last_stats if config.method == "rk23" else None,
+            resumed_flag=resumed,
         )
         write_h5_meta(h5, meta, config_hash=config_hash)
         h5.flush()

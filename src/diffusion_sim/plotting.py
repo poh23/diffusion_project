@@ -72,7 +72,16 @@ def plot_std(sim, show_theory=True, k=None, v0=None, l=None):
     plt.show()
 
 
-def save_mp4(sim, out_path="simulation.mp4", fps=30, dpi=120, step=10, marker_size=64):
+def save_mp4(
+    sim,
+    out_path="simulation.mp4",
+    fps=30,
+    dpi=120,
+    step=10,
+    marker_size=64,
+    axis_smoothing=0.2,
+    axis_padding_frac=0.05,
+):
     """
     Save an MP4 of particle motion (no trails) and return the output path.
     """
@@ -83,11 +92,7 @@ def save_mp4(sim, out_path="simulation.mp4", fps=30, dpi=120, step=10, marker_si
     if len(r_view) < 2:
         raise ValueError("Not enough frames to animate (try smaller step or more steps).")
 
-    max_range = np.max(np.abs(r_hist)) * 1.1
-
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.set_xlim(-max_range, max_range)
-    ax.set_ylim(-max_range, max_range)
     ax.set_aspect("equal")
     ax.grid(True, alpha=0.3)
 
@@ -114,10 +119,65 @@ def save_mp4(sim, out_path="simulation.mp4", fps=30, dpi=120, step=10, marker_si
 
     particles = ax.scatter(r_view[0, :, 0], r_view[0, :, 1],
                            s=marker_size, c=colors)
+    times = np.asarray(sim.get("times", []))
+    t_view = times[::step] if times.size else None
+    time_text = ax.text(
+        0.02,
+        0.98,
+        "",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+    )
+
+    # Initialize dynamic limits from first frame.
+    x0 = r_view[0, :, 0]
+    y0 = r_view[0, :, 1]
+    x_min = float(np.min(x0))
+    x_max = float(np.max(x0))
+    y_min = float(np.min(y0))
+    y_max = float(np.max(y0))
+    cx = 0.5 * (x_min + x_max)
+    cy = 0.5 * (y_min + y_max)
+    half_x = max(0.5 * (x_max - x_min), 1e-9)
+    half_y = max(0.5 * (y_max - y_min), 1e-9)
+    half = max(half_x, half_y) * (1.0 + axis_padding_frac)
+    smoothed_cx = cx
+    smoothed_cy = cy
+    smoothed_half = half
+    ax.set_xlim(smoothed_cx - smoothed_half, smoothed_cx + smoothed_half)
+    ax.set_ylim(smoothed_cy - smoothed_half, smoothed_cy + smoothed_half)
+
+    alpha = float(np.clip(axis_smoothing, 0.0, 1.0))
 
     def update(frame_idx):
-        particles.set_offsets(r_view[frame_idx])
-        return (particles,)
+        nonlocal smoothed_cx, smoothed_cy, smoothed_half
+        frame = r_view[frame_idx]
+        particles.set_offsets(frame)
+
+        x = frame[:, 0]
+        y = frame[:, 1]
+        x_min_f = float(np.min(x))
+        x_max_f = float(np.max(x))
+        y_min_f = float(np.min(y))
+        y_max_f = float(np.max(y))
+        cx_f = 0.5 * (x_min_f + x_max_f)
+        cy_f = 0.5 * (y_min_f + y_max_f)
+        half_x_f = max(0.5 * (x_max_f - x_min_f), 1e-9)
+        half_y_f = max(0.5 * (y_max_f - y_min_f), 1e-9)
+        half_f = max(half_x_f, half_y_f) * (1.0 + axis_padding_frac)
+
+        smoothed_cx = (1.0 - alpha) * smoothed_cx + alpha * cx_f
+        smoothed_cy = (1.0 - alpha) * smoothed_cy + alpha * cy_f
+        smoothed_half = (1.0 - alpha) * smoothed_half + alpha * half_f
+        ax.set_xlim(smoothed_cx - smoothed_half, smoothed_cx + smoothed_half)
+        ax.set_ylim(smoothed_cy - smoothed_half, smoothed_cy + smoothed_half)
+
+        if t_view is not None and frame_idx < len(t_view):
+            time_text.set_text(f"t = {t_view[frame_idx]:.5f}")
+        else:
+            time_text.set_text("")
+        return (particles, time_text)
 
     ani = FuncAnimation(fig, update, frames=len(r_view), blit=True)
 
