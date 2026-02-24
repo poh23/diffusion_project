@@ -81,11 +81,44 @@ def save_mp4(
     marker_size=64,
     axis_smoothing=0.2,
     axis_padding_frac=0.05,
+    t_start=None,
+    t_end=None,
 ):
     """
     Save an MP4 of particle motion (no trails) and return the output path.
+    Optional t_start/t_end select an animation window in simulation time.
+    Requested bounds are clamped to available times and snapped to nearest samples.
     """
     r_hist = np.asarray(sim["positions"])
+    times = np.asarray(sim.get("times", []))
+
+    if t_start is not None or t_end is not None:
+        if times.size == 0:
+            raise ValueError("t_start/t_end require sim['times'].")
+        if times.shape[0] != r_hist.shape[0]:
+            raise ValueError("sim['times'] length must match sim['positions'] frames.")
+
+        t_min = float(np.min(times))
+        t_max = float(np.max(times))
+
+        if t_start is None:
+            start_idx = 0
+        else:
+            t_start_clamped = float(np.clip(float(t_start), t_min, t_max))
+            start_idx = int(np.abs(times - t_start_clamped).argmin())
+
+        if t_end is None:
+            end_idx = times.shape[0] - 1
+        else:
+            t_end_clamped = float(np.clip(float(t_end), t_min, t_max))
+            end_idx = int(np.abs(times - t_end_clamped).argmin())
+
+        if start_idx > end_idx:
+            start_idx, end_idx = end_idx, start_idx
+
+        r_hist = r_hist[start_idx:end_idx + 1]
+        times = times[start_idx:end_idx + 1]
+
     n = r_hist.shape[1]
 
     r_view = r_hist[::step]
@@ -119,7 +152,6 @@ def save_mp4(
 
     particles = ax.scatter(r_view[0, :, 0], r_view[0, :, 1],
                            s=marker_size, c=colors)
-    times = np.asarray(sim.get("times", []))
     t_view = times[::step] if times.size else None
     time_text = ax.text(
         0.02,
@@ -202,11 +234,20 @@ def embed_mp4(path, width=600, embed=True):
 
 
 def animate_mp4(sim, out_path="simulation.mp4", fps=30, dpi=120, step=10,
-                marker_size=64, width=600, embed=True):
+                marker_size=64, width=600, embed=True, t_start=None, t_end=None):
     """
     Convenience: save mp4 then return a Jupyter-embeddable Video object.
     """
-    path = save_mp4(sim, out_path=out_path, fps=fps, dpi=dpi, step=step, marker_size=marker_size)
+    path = save_mp4(
+        sim,
+        out_path=out_path,
+        fps=fps,
+        dpi=dpi,
+        step=step,
+        marker_size=marker_size,
+        t_start=t_start,
+        t_end=t_end,
+    )
     return embed_mp4(path, width=width, embed=embed)
 
 
@@ -486,3 +527,161 @@ def plot_scaled_density_vs_radius(
     elif created_fig:
         plt.close(fig)
     return fig, (ax1, ax2)
+
+
+def plot_msd_by_charge(
+    sim,
+    particle_indices_by_charge=None,
+    origin_window=None,
+    same_plot=False,
+    ax_list=None,
+    show=True,
+):
+    """
+    Plot mean-square displacement (MSD) vs time for one representative particle
+    from each charge population.
+
+    MSD is computed as |r(t) - r(0)|^2 by default. If `origin_window` is set,
+    MSD is averaged over multiple initial time origins in the window:
+        mean_{o in origins} |r(t+o) - r(o)|^2
+
+    Args:
+      sim: simulation dict (as returned by load_npz/load_h5), requires
+           "positions", "times", and "charges".
+      particle_indices_by_charge: optional dict mapping charge value -> global
+           particle index to use for that charge. Defaults to first particle
+           index found for each charge.
+      origin_window: optional averaging window for time-origin averaging.
+           - None: single origin at t=0.
+           - int >= 1: number of initial frames used as origins.
+           - float > 0: duration in simulation time; uses frames with
+              times <= times[0] + origin_window.
+      same_plot: if True, plot all charge curves on a single axis.
+      ax_list: optional matplotlib axis/axes. If same_plot is True, provide
+           one axis; otherwise provide one axis per charge.
+      show: whether to call plt.show().
+    """
+    positions = np.asarray(sim["positions"])
+    times = np.asarray(sim["times"])
+    charges = sim.get("charges")
+
+    if charges is None:
+        raise KeyError("Simulation dict must contain 'charges' for charge-wise MSD.")
+    charges = np.asarray(charges)
+
+    if positions.ndim != 3 or positions.shape[2] != 2:
+        raise ValueError(
+            f"Expected positions shape (steps, n_particles, 2), got {positions.shape}."
+        )
+    if times.ndim != 1 or times.shape[0] != positions.shape[0]:
+        raise ValueError("sim['times'] must be 1D with length equal to positions steps.")
+    if charges.shape != (positions.shape[1],):
+        raise ValueError("sim['charges'] must have length equal to n_particles.")
+
+    unique_charges = np.unique(charges)
+    if unique_charges.size == 0:
+        raise ValueError("No charge groups found in sim['charges'].")
+
+    selected_indices = {}
+    for q in unique_charges:
+        members = np.flatnonzero(np.isclose(charges, q))
+        if members.size == 0:
+            continue
+        if particle_indices_by_charge is None or q not in particle_indices_by_charge:
+            idx = int(members[0])
+        else:
+            idx = int(particle_indices_by_charge[q])
+            if idx < 0 or idx >= positions.shape[1]:
+                raise ValueError(f"Index {idx} for charge {q} is out of range.")
+            if not np.isclose(charges[idx], q):
+                raise ValueError(
+                    f"Index {idx} has charge {charges[idx]}, expected charge {q}."
+                )
+        selected_indices[q] = idx
+
+    if not selected_indices:
+        raise ValueError("Could not select representative particles for charge groups.")
+
+    n_charges = len(unique_charges)
+    created_fig = False
+    if ax_list is None:
+        if same_plot:
+            fig, ax = plt.subplots(figsize=(8, 4))
+            axes = np.asarray([ax])
+        else:
+            fig, axes = plt.subplots(
+                nrows=n_charges,
+                ncols=1,
+                figsize=(8, max(3, 3 * n_charges)),
+                squeeze=False,
+                sharex=True,
+            )
+            axes = axes[:, 0]
+        created_fig = True
+    else:
+        axes = np.asarray(ax_list).reshape(-1)
+        expected_axes = 1 if same_plot else n_charges
+        if axes.shape[0] != expected_axes:
+            raise ValueError(f"ax_list has {axes.shape[0]} axes, expected {expected_axes}.")
+        fig = axes[0].figure
+
+    if origin_window is None:
+        n_origins = 1
+    elif isinstance(origin_window, (int, np.integer)):
+        n_origins = int(origin_window)
+    elif isinstance(origin_window, (float, np.floating)):
+        if origin_window <= 0:
+            raise ValueError("origin_window duration must be > 0.")
+        t_limit = float(times[0]) + float(origin_window)
+        n_origins = int(np.count_nonzero(times <= t_limit))
+    else:
+        raise TypeError("origin_window must be None, int, or float.")
+
+    if n_origins < 1:
+        raise ValueError("origin_window selected zero origins; increase the window.")
+    if n_origins > times.shape[0]:
+        n_origins = times.shape[0]
+
+    for i, q in enumerate(unique_charges):
+        ax = axes[0] if same_plot else axes[i]
+        idx = selected_indices[q]
+        traj = positions[:, idx, :]  # (steps, 2)
+
+        if n_origins == 1:
+            disp = traj - traj[0]
+            msd = np.sum(disp * disp, axis=1)
+            t_plot = times - times[0]
+        else:
+            # Average over early origins and align by lag.
+            max_lag = times.shape[0] - n_origins
+            msd_accum = np.zeros(max_lag + 1, dtype=float)
+            for origin in range(n_origins):
+                disp = traj[origin:origin + max_lag + 1] - traj[origin]
+                msd_accum += np.sum(disp * disp, axis=1)
+            msd = msd_accum / float(n_origins)
+            t_plot = times[: max_lag + 1] - times[0]
+
+        label = f"q={float(q):g}, idx={idx}"
+        if n_origins > 1:
+            label += f", origins={n_origins}"
+        ax.plot(t_plot, msd, linewidth=2, label=label)
+        ax.set_ylabel("MSD")
+        if not same_plot:
+            ax.set_title(f"Charge q={float(q):g}")
+        ax.grid(True, alpha=0.3)
+
+    if same_plot:
+        axes[0].set_title("MSD by charge")
+        axes[0].set_xlabel("Time")
+        axes[0].legend()
+    else:
+        for ax in axes:
+            ax.legend()
+        axes[-1].set_xlabel("Time")
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    elif created_fig:
+        plt.close(fig)
+    return fig, axes
