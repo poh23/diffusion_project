@@ -66,6 +66,27 @@ def open_h5_batch(path, n_particles, *, resume=False, chunk_len=1024):
             dtype=np.float64,
         )
         h5.create_dataset(
+            "energy_aa",
+            shape=(0,),
+            maxshape=(None,),
+            chunks=(chunk_len,),
+            dtype=np.float64,
+        )
+        h5.create_dataset(
+            "energy_ab",
+            shape=(0,),
+            maxshape=(None,),
+            chunks=(chunk_len,),
+            dtype=np.float64,
+        )
+        h5.create_dataset(
+            "energy_bb",
+            shape=(0,),
+            maxshape=(None,),
+            chunks=(chunk_len,),
+            dtype=np.float64,
+        )
+        h5.create_dataset(
             "std",
             shape=(0,),
             maxshape=(None,),
@@ -78,11 +99,25 @@ def open_h5_batch(path, n_particles, *, resume=False, chunk_len=1024):
             maxshape=(n_particles, 2),
             dtype=np.float64,
         )
+    else:
+        chunk_len = max(1, int(chunk_len))
+        existing_len = h5["times"].shape[0] if "times" in h5 else 0
+        for name in ("energy_aa", "energy_ab", "energy_bb"):
+            if name not in h5:
+                h5.create_dataset(
+                    name,
+                    shape=(existing_len,),
+                    maxshape=(None,),
+                    chunks=(chunk_len,),
+                    dtype=np.float64,
+                )
+                if existing_len > 0:
+                    h5[name][...] = np.nan
 
     return h5
 
 
-def append_h5_batch(h5, positions, times, energy, std):
+def append_h5_batch(h5, positions, times, energy, std, energy_aa=None, energy_ab=None, energy_bb=None):
     n_new = len(times)
     if n_new == 0:
         return
@@ -93,11 +128,26 @@ def append_h5_batch(h5, positions, times, energy, std):
     h5["positions"].resize((end, h5["positions"].shape[1], 2))
     h5["times"].resize((end,))
     h5["energy"].resize((end,))
+    h5["energy_aa"].resize((end,))
+    h5["energy_ab"].resize((end,))
+    h5["energy_bb"].resize((end,))
     h5["std"].resize((end,))
 
     h5["positions"][start:end] = positions
     h5["times"][start:end] = times
     h5["energy"][start:end] = energy
+    if energy_aa is None:
+        h5["energy_aa"][start:end] = np.nan
+    else:
+        h5["energy_aa"][start:end] = energy_aa
+    if energy_ab is None:
+        h5["energy_ab"][start:end] = np.nan
+    else:
+        h5["energy_ab"][start:end] = energy_ab
+    if energy_bb is None:
+        h5["energy_bb"][start:end] = np.nan
+    else:
+        h5["energy_bb"][start:end] = energy_bb
     h5["std"][start:end] = std
 
 

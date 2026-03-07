@@ -126,11 +126,15 @@ def save_with_density(
         "positions": sim["positions"],
         "times": sim["times"],
         "energy": sim["energy"],
+        "energy_aa": sim.get("energy_aa"),
+        "energy_ab": sim.get("energy_ab"),
+        "energy_bb": sim.get("energy_bb"),
         "std": sim["std"],
         "final_positions": sim["final_positions"],
         "density": density,
         "meta_json": np.array(meta_json, dtype=object),
     }
+    arrays = {key: value for key, value in arrays.items() if value is not None}
     if sim.get("charges") is not None:
         arrays["charges"] = sim["charges"]
     if radii is not None:

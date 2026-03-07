@@ -3,7 +3,7 @@ from scipy.integrate import solve_ivp
 from tqdm.auto import tqdm
 
 from ..forces import compute_velocity_overdamped
-from ..metrics import compute_energy_numba, compute_std_numba
+from ..metrics import compute_energy_components, compute_std_numba
 
 __all__ = ["run_dop853_chunked"]
 
@@ -25,6 +25,7 @@ def run_dop853_chunked(
     skip_first=False,
     stop_condition=None,
     charges=None,
+    population_values=None,
 ):
     """
     Chunked DOP853 integration so we can print progress.
@@ -37,11 +38,17 @@ def run_dop853_chunked(
         positions = np.empty((steps, n, 2), dtype=np.float64)
         times = np.empty(steps, dtype=np.float64)
         energy = np.empty(steps, dtype=np.float64)
+        energy_aa = np.empty(steps, dtype=np.float64)
+        energy_ab = np.empty(steps, dtype=np.float64)
+        energy_bb = np.empty(steps, dtype=np.float64)
         std = np.empty(steps, dtype=np.float64)
     else:
         positions = np.empty((0, n, 2), dtype=np.float64)
         times = np.empty(0, dtype=np.float64)
         energy = np.empty(0, dtype=np.float64)
+        energy_aa = np.empty(0, dtype=np.float64)
+        energy_ab = np.empty(0, dtype=np.float64)
+        energy_bb = np.empty(0, dtype=np.float64)
         std = np.empty(0, dtype=np.float64)
 
     def rhs(t, y):
@@ -81,19 +88,38 @@ def run_dop853_chunked(
 
         # metrics
         energy_chunk = np.empty(m, dtype=np.float64)
+        energy_aa_chunk = np.empty(m, dtype=np.float64)
+        energy_ab_chunk = np.empty(m, dtype=np.float64)
+        energy_bb_chunk = np.empty(m, dtype=np.float64)
         std_chunk = np.empty(m, dtype=np.float64)
         for i in range(m):
-            energy_chunk[i] = compute_energy_numba(r_hist[i], k, v0, l, r_floor, charges)
+            (
+                energy_chunk[i],
+                energy_aa_chunk[i],
+                energy_ab_chunk[i],
+                energy_bb_chunk[i],
+            ) = compute_energy_components(
+                r_hist[i],
+                k,
+                v0,
+                l,
+                r_floor,
+                charges,
+                population_values=population_values,
+            )
             std_chunk[i] = compute_std_numba(r_hist[i])
 
         if return_arrays:
             positions[idx : idx + m] = r_hist
             times[idx : idx + m] = t_hist
             energy[idx : idx + m] = energy_chunk
+            energy_aa[idx : idx + m] = energy_aa_chunk
+            energy_ab[idx : idx + m] = energy_ab_chunk
+            energy_bb[idx : idx + m] = energy_bb_chunk
             std[idx : idx + m] = std_chunk
 
         if record_hook is not None:
-            record_hook(t_hist, r_hist, energy_chunk, std_chunk)
+            record_hook(t_hist, r_hist, energy_chunk, std_chunk, energy_aa_chunk, energy_ab_chunk, energy_bb_chunk)
 
         # prepare next chunk
         if sol.sol is None:
@@ -113,8 +139,11 @@ def run_dop853_chunked(
         positions = positions[:idx]
         times = times[:idx]
         energy = energy[:idx]
+        energy_aa = energy_aa[:idx]
+        energy_ab = energy_ab[:idx]
+        energy_bb = energy_bb[:idx]
         std = std[:idx]
 
     r_final = y.reshape((n, 2))
     pbar.close()
-    return r_final, positions, energy, std, times
+    return r_final, positions, energy, energy_aa, energy_ab, energy_bb, std, times

@@ -3,7 +3,7 @@ from numba import njit
 from scipy.integrate import RK23, RK45
 
 from ..forces import compute_velocity_overdamped
-from ..metrics import compute_energy_numba, compute_std_numba
+from ..metrics import compute_energy_components, compute_std_numba
 
 __all__ = ["run_rk23_dynamic"]
 
@@ -39,10 +39,18 @@ def _select_solver_class(method: str):
     raise ValueError("method must be 'RK23' or 'RK45'")
 
 
-def _compute_metrics(r_view, k, v0, l, r_floor, charges):
-    energy = compute_energy_numba(r_view, k, v0, l, r_floor, charges)
+def _compute_metrics(r_view, k, v0, l, r_floor, charges, population_values):
+    energy, energy_aa, energy_ab, energy_bb = compute_energy_components(
+        r_view,
+        k,
+        v0,
+        l,
+        r_floor,
+        charges,
+        population_values=population_values,
+    )
     std = compute_std_numba(r_view)
-    return energy, std
+    return energy, std, energy_aa, energy_ab, energy_bb
 
 
 def _should_record_now(step_count, t_curr, next_save_t, record_schedule_dt, metric_every):
@@ -109,6 +117,9 @@ def _initialize_sampling(
         times = base_sample_t0 + sample_dt * np.arange(sample_count, dtype=np.float64)
         positions = np.empty((sample_count, n, 2), dtype=np.float64)
         energy = np.empty(sample_count, dtype=np.float64)
+        energy_aa = np.empty(sample_count, dtype=np.float64)
+        energy_ab = np.empty(sample_count, dtype=np.float64)
+        energy_bb = np.empty(sample_count, dtype=np.float64)
         std = np.empty(sample_count, dtype=np.float64)
         sample_idx = 0
     else:
@@ -120,6 +131,9 @@ def _initialize_sampling(
             sample_idx = None
         positions = []
         energy = []
+        energy_aa = []
+        energy_ab = []
+        energy_bb = []
         std = []
 
     return dict(
@@ -131,6 +145,9 @@ def _initialize_sampling(
         times=times,
         positions=positions,
         energy=energy,
+        energy_aa=energy_aa,
+        energy_ab=energy_ab,
+        energy_bb=energy_bb,
         std=std,
     )
 
@@ -146,24 +163,33 @@ def _record_nonsampling_initial_point(
     l,
     r_floor,
     charges,
+    population_values,
     record: bool,
     record_hook,
     times,
     positions,
     energy,
+    energy_aa,
+    energy_ab,
+    energy_bb,
     std,
 ):
     if not do_record or using_sampling:
         return
     r_view = solver.y.reshape((n, 2))
-    e0, s0 = _compute_metrics(r_view, k, v0, l, r_floor, charges)
+    e0, s0, e0_aa, e0_ab, e0_bb = _compute_metrics(
+        r_view, k, v0, l, r_floor, charges, population_values
+    )
     if record:
         times.append(solver.t)
         positions.append(r_view.copy())
         energy.append(e0)
+        energy_aa.append(e0_aa)
+        energy_ab.append(e0_ab)
+        energy_bb.append(e0_bb)
         std.append(s0)
     if record_hook is not None:
-        record_hook(solver.t, r_view.copy(), e0, s0)
+        record_hook(solver.t, r_view.copy(), e0, s0, e0_aa, e0_ab, e0_bb)
 
 
 def _record_sampling_points_between(
@@ -181,10 +207,14 @@ def _record_sampling_points_between(
     l,
     r_floor,
     charges,
+    population_values,
     record: bool,
     record_hook,
     positions,
     energy,
+    energy_aa,
+    energy_ab,
+    energy_bb,
     std,
 ):
     while sample_idx < sample_count and times[sample_idx] <= t_curr:
@@ -195,13 +225,26 @@ def _record_sampling_points_between(
             alpha = 0.0
         y_sample = y_prev + alpha * (y_curr - y_prev)
         r_sample = y_sample.reshape((n, 2))
-        e_sample, s_sample = _compute_metrics(r_sample, k, v0, l, r_floor, charges)
+        e_sample, s_sample, e_sample_aa, e_sample_ab, e_sample_bb = _compute_metrics(
+            r_sample, k, v0, l, r_floor, charges, population_values
+        )
         if record:
             positions[sample_idx] = r_sample
             energy[sample_idx] = e_sample
+            energy_aa[sample_idx] = e_sample_aa
+            energy_ab[sample_idx] = e_sample_ab
+            energy_bb[sample_idx] = e_sample_bb
             std[sample_idx] = s_sample
         if record_hook is not None:
-            record_hook(t_sample, r_sample.copy(), e_sample, s_sample)
+            record_hook(
+                t_sample,
+                r_sample.copy(),
+                e_sample,
+                s_sample,
+                e_sample_aa,
+                e_sample_ab,
+                e_sample_bb,
+            )
         sample_idx += 1
     return sample_idx
 
@@ -266,11 +309,15 @@ def _record_nonsampling_step(
     l,
     r_floor,
     charges,
+    population_values,
     record: bool,
     record_hook,
     times,
     positions,
     energy,
+    energy_aa,
+    energy_ab,
+    energy_bb,
     std,
 ):
     should_record = _should_record_now(
@@ -282,14 +329,19 @@ def _record_nonsampling_step(
     )
 
     if should_record:
-        e_now, s_now = _compute_metrics(r_view, k, v0, l, r_floor, charges)
+        e_now, s_now, e_now_aa, e_now_ab, e_now_bb = _compute_metrics(
+            r_view, k, v0, l, r_floor, charges, population_values
+        )
         if record:
             times.append(solver.t)
             positions.append(r_view.copy())
             energy.append(e_now)
+            energy_aa.append(e_now_aa)
+            energy_ab.append(e_now_ab)
+            energy_bb.append(e_now_bb)
             std.append(s_now)
         if record_hook is not None:
-            record_hook(solver.t, r_view.copy(), e_now, s_now)
+            record_hook(solver.t, r_view.copy(), e_now, s_now, e_now_aa, e_now_ab, e_now_bb)
         if next_save_t is not None:
             next_save_t = _advance_next_save_t(next_save_t, record_schedule_dt, t_curr)
 
@@ -304,6 +356,9 @@ def _finalize_recorded_arrays(
     times,
     positions,
     energy,
+    energy_aa,
+    energy_ab,
+    energy_bb,
     std,
     n: int,
 ):
@@ -311,6 +366,9 @@ def _finalize_recorded_arrays(
         return (
             positions[:sample_idx],
             energy[:sample_idx],
+            energy_aa[:sample_idx],
+            energy_ab[:sample_idx],
+            energy_bb[:sample_idx],
             std[:sample_idx],
             times[:sample_idx],
         )
@@ -318,11 +376,17 @@ def _finalize_recorded_arrays(
         return (
             np.asarray(positions, dtype=np.float64),
             np.asarray(energy, dtype=np.float64),
+            np.asarray(energy_aa, dtype=np.float64),
+            np.asarray(energy_ab, dtype=np.float64),
+            np.asarray(energy_bb, dtype=np.float64),
             np.asarray(std, dtype=np.float64),
             np.asarray(times, dtype=np.float64),
         )
     return (
         np.empty((0, n, 2), dtype=np.float64),
+        np.empty(0, dtype=np.float64),
+        np.empty(0, dtype=np.float64),
+        np.empty(0, dtype=np.float64),
         np.empty(0, dtype=np.float64),
         np.empty(0, dtype=np.float64),
         np.empty(0, dtype=np.float64),
@@ -377,6 +441,7 @@ def _setup_rk23_run(
     diffusion_seed,
     diffusion_rng_state,
     diffusion_noise_var,
+    population_values,
 ):
     n = r0.shape[0]
     t0, tf = t_span
@@ -439,11 +504,15 @@ def _setup_rk23_run(
         l=l,
         r_floor=r_floor,
         charges=charges,
+        population_values=population_values,
         record=record,
         record_hook=record_hook,
         times=times,
         positions=positions,
         energy=energy,
+        energy_aa=sampling_state["energy_aa"],
+        energy_ab=sampling_state["energy_ab"],
+        energy_bb=sampling_state["energy_bb"],
         std=std,
     )
 
@@ -465,10 +534,14 @@ def _setup_rk23_run(
             l=l,
             r_floor=r_floor,
             charges=charges,
+            population_values=population_values,
             record=record,
             record_hook=record_hook,
             positions=positions,
             energy=energy,
+            energy_aa=sampling_state["energy_aa"],
+            energy_ab=sampling_state["energy_ab"],
+            energy_bb=sampling_state["energy_bb"],
             std=std,
         )
 
@@ -479,6 +552,7 @@ def _setup_rk23_run(
         l=l,
         r_floor=r_floor,
         charges=charges,
+        population_values=population_values,
         method_upper=method_upper,
         solver=solver,
         max_step=max_step,
@@ -500,6 +574,9 @@ def _setup_rk23_run(
         times=times,
         positions=positions,
         energy=energy,
+        energy_aa=sampling_state["energy_aa"],
+        energy_ab=sampling_state["energy_ab"],
+        energy_bb=sampling_state["energy_bb"],
         std=std,
         t_prev=t_prev,
         y_prev=y_prev,
@@ -565,10 +642,14 @@ def _integrate_rk23_loop(runtime: dict, *, record: bool, callback, record_hook, 
                 l=runtime["l"],
                 r_floor=runtime["r_floor"],
                 charges=runtime["charges"],
+                population_values=runtime["population_values"],
                 record=record,
                 record_hook=record_hook,
                 positions=runtime["positions"],
                 energy=runtime["energy"],
+                energy_aa=runtime["energy_aa"],
+                energy_ab=runtime["energy_ab"],
+                energy_bb=runtime["energy_bb"],
                 std=runtime["std"],
             )
         elif runtime["do_record"]:
@@ -585,11 +666,15 @@ def _integrate_rk23_loop(runtime: dict, *, record: bool, callback, record_hook, 
                 l=runtime["l"],
                 r_floor=runtime["r_floor"],
                 charges=runtime["charges"],
+                population_values=runtime["population_values"],
                 record=record,
                 record_hook=record_hook,
                 times=runtime["times"],
                 positions=runtime["positions"],
                 energy=runtime["energy"],
+                energy_aa=runtime["energy_aa"],
+                energy_ab=runtime["energy_ab"],
+                energy_bb=runtime["energy_bb"],
                 std=runtime["std"],
             )
 
@@ -635,6 +720,7 @@ def run_rk23_dynamic(
     diffusion_rng_state=None,
     diffusion_noise_var=1.0,
     stop_condition=None,
+    population_values=None,
 ):
     """
     Adaptive RK23 (or RK45) integrator with optional callback and recording.
@@ -720,6 +806,7 @@ def run_rk23_dynamic(
         diffusion_seed=diffusion_seed,
         diffusion_rng_state=diffusion_rng_state,
         diffusion_noise_var=diffusion_noise_var,
+        population_values=population_values,
     )
 
     runtime = _integrate_rk23_loop(
@@ -730,13 +817,16 @@ def run_rk23_dynamic(
         stop_condition=stop_condition,
     )
 
-    positions, energy, std, times = _finalize_recorded_arrays(
+    positions, energy, energy_aa, energy_ab, energy_bb, std, times = _finalize_recorded_arrays(
         record=record,
         using_sampling=runtime["using_sampling"],
         sample_idx=runtime["sample_idx"],
         times=runtime["times"],
         positions=runtime["positions"],
         energy=runtime["energy"],
+        energy_aa=runtime["energy_aa"],
+        energy_ab=runtime["energy_ab"],
+        energy_bb=runtime["energy_bb"],
         std=runtime["std"],
         n=runtime["n"],
     )
@@ -750,5 +840,5 @@ def run_rk23_dynamic(
     )
 
     if return_stats:
-        return runtime["r_final"], positions, energy, std, times, stats
-    return runtime["r_final"], positions, energy, std, times
+        return runtime["r_final"], positions, energy, energy_aa, energy_ab, energy_bb, std, times, stats
+    return runtime["r_final"], positions, energy, energy_aa, energy_ab, energy_bb, std, times

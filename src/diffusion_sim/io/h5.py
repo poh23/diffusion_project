@@ -25,6 +25,12 @@ def save_h5(out_path, sim_dict):
         h5.create_dataset("positions", data=sim_dict["positions"], compression=None)
         h5.create_dataset("times", data=sim_dict["times"], compression=None)
         h5.create_dataset("energy", data=sim_dict["energy"], compression=None)
+        if sim_dict.get("energy_aa") is not None:
+            h5.create_dataset("energy_aa", data=sim_dict["energy_aa"], compression=None)
+        if sim_dict.get("energy_ab") is not None:
+            h5.create_dataset("energy_ab", data=sim_dict["energy_ab"], compression=None)
+        if sim_dict.get("energy_bb") is not None:
+            h5.create_dataset("energy_bb", data=sim_dict["energy_bb"], compression=None)
         h5.create_dataset("std", data=sim_dict["std"], compression=None)
         h5.create_dataset("final_positions", data=sim_dict["final_positions"], compression=None)
         if sim_dict.get("charges") is not None:
@@ -48,6 +54,9 @@ def load_h5(path):
         positions = h5["positions"][()]
         times = h5["times"][()]
         energy = h5["energy"][()]
+        energy_aa = h5["energy_aa"][()] if "energy_aa" in h5 else None
+        energy_ab = h5["energy_ab"][()] if "energy_ab" in h5 else None
+        energy_bb = h5["energy_bb"][()] if "energy_bb" in h5 else None
         std = h5["std"][()]
         final_positions = h5["final_positions"][()]
         charges = h5["charges"][()] if "charges" in h5 else None
@@ -63,6 +72,9 @@ def load_h5(path):
         positions=positions,
         times=times,
         energy=energy,
+        energy_aa=energy_aa,
+        energy_ab=energy_ab,
+        energy_bb=energy_bb,
         std=std,
         final_positions=final_positions,
         charges=charges,

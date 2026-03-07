@@ -27,7 +27,7 @@ def load_npz(path):
     """
     Load simulation data from .npz (expects new-format files with meta_json).
     Returns a dict with positions, times, energy, std, final_positions,
-    optional density/radii if present, meta, source_path.
+    optional energy components, density/radii if present, meta, source_path.
     """
     data = np.load(path, allow_pickle=True)
 
@@ -36,6 +36,9 @@ def load_npz(path):
     energy = _pick(data, "energy", "pe", "pe_history", "pe_hist")
     std = _pick(data, "std", "std_history", "std_hist")
     final_positions = _pick(data, "final_positions", "r_final")
+    energy_aa = _pick(data, "energy_aa")
+    energy_ab = _pick(data, "energy_ab")
+    energy_bb = _pick(data, "energy_bb")
     density = _pick(data, "density")
     radii = _pick(data, "radii")
     charges = _pick(data, "charges")
@@ -68,6 +71,9 @@ def load_npz(path):
         positions=positions,
         times=times,
         energy=energy,
+        energy_aa=energy_aa,
+        energy_ab=energy_ab,
+        energy_bb=energy_bb,
         std=std,
         final_positions=final_positions,
         charges=charges,
@@ -87,10 +93,15 @@ def save_npz(out_path, sim_dict):
         "positions": sim_dict["positions"],
         "times": sim_dict["times"],
         "energy": sim_dict["energy"],
+        "energy_aa": sim_dict.get("energy_aa"),
+        "energy_ab": sim_dict.get("energy_ab"),
+        "energy_bb": sim_dict.get("energy_bb"),
         "std": sim_dict["std"],
         "final_positions": sim_dict["final_positions"],
         "meta_json": np.array(meta_json, dtype=object),
     }
+
+    arrays = {key: value for key, value in arrays.items() if value is not None}
 
     # optional
     if sim_dict.get("density") is not None:

@@ -55,13 +55,14 @@ def run_nonstream_simulation(config: SimulationConfig) -> dict:
         pbar = tqdm(total=config.t_duration, desc="rk23", unit="t")
         progress_callback = _RK23ProgressCallback(pbar=pbar, t_start=config.t0)
 
-        r_final, r_hist, pe_hist, std_hist, t_hist, rk23_stats = run_rk23_dynamic(
+        r_final, r_hist, pe_hist, e_aa_hist, e_ab_hist, e_bb_hist, std_hist, t_hist, rk23_stats = run_rk23_dynamic(
             r0,
             config.k,
             config.v0,
             config.l,
             config.r_floor,
             charges=charges,
+            population_values=config.charge_values,
             t_span=t_span,
             rtol=config.rtol,
             atol=config.atol,
@@ -85,7 +86,7 @@ def run_nonstream_simulation(config: SimulationConfig) -> dict:
     elif config.method == "dop853":
         dt = config.save_every
         steps = sample_count
-        r_final, r_hist, pe_hist, std_hist, t_hist = run_dop853_chunked(
+        r_final, r_hist, pe_hist, e_aa_hist, e_ab_hist, e_bb_hist, std_hist, t_hist = run_dop853_chunked(
             r0,
             config.k,
             config.v0,
@@ -98,6 +99,7 @@ def run_nonstream_simulation(config: SimulationConfig) -> dict:
             rtol=config.rtol,
             atol=config.atol,
             chunk_steps=config.chunk_steps,
+            population_values=config.charge_values,
         )
     else:
         raise ValueError("method must be 'rk23' or 'dop853'")
@@ -115,6 +117,9 @@ def run_nonstream_simulation(config: SimulationConfig) -> dict:
         positions=r_hist,
         times=t_hist,
         energy=pe_hist,
+        energy_aa=e_aa_hist,
+        energy_ab=e_ab_hist,
+        energy_bb=e_bb_hist,
         std=std_hist,
         final_positions=r_final,
         charges=charges,

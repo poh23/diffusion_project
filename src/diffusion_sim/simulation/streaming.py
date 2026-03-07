@@ -35,7 +35,7 @@ class _BatchAccumulator:
         if batch_every is not None:
             n_intervals = int(np.floor((start_t - t0) / batch_every))
             self.next_batch_t = t0 + (n_intervals + 1) * batch_every
-        bytes_per_frame = (2 * n_particles * 8) + (3 * 8)
+        bytes_per_frame = (2 * n_particles * 8) + (6 * 8)
         self.target_frames = None
         if target_batch_mb is not None:
             target_bytes = target_batch_mb * 1024 * 1024
@@ -43,22 +43,31 @@ class _BatchAccumulator:
         self._times = []
         self._positions = []
         self._energy = []
+        self._energy_aa = []
+        self._energy_ab = []
+        self._energy_bb = []
         self._std = []
 
-    def append(self, t, r, energy, std):
+    def append(self, t, r, energy, std, energy_aa, energy_ab, energy_bb):
         self._times.append(float(t))
         self._positions.append(r.copy())
         self._energy.append(float(energy))
+        self._energy_aa.append(float(energy_aa))
+        self._energy_ab.append(float(energy_ab))
+        self._energy_bb.append(float(energy_bb))
         self._std.append(float(std))
         if self._should_flush(float(t)):
             self.flush(float(t))
 
-    def append_batch(self, times, positions, energy, std):
+    def append_batch(self, times, positions, energy, std, energy_aa, energy_ab, energy_bb):
         if len(times) == 0:
             return
         self._times.extend([float(t) for t in times])
         self._positions.extend([p.copy() for p in positions])
         self._energy.extend([float(e) for e in energy])
+        self._energy_aa.extend([float(e) for e in energy_aa])
+        self._energy_ab.extend([float(e) for e in energy_ab])
+        self._energy_bb.extend([float(e) for e in energy_bb])
         self._std.extend([float(s) for s in std])
         last_t = float(times[-1])
         if self._should_flush(last_t):
@@ -78,13 +87,28 @@ class _BatchAccumulator:
         times = np.asarray(self._times, dtype=np.float64)
         positions = np.asarray(self._positions, dtype=np.float64)
         energy = np.asarray(self._energy, dtype=np.float64)
+        energy_aa = np.asarray(self._energy_aa, dtype=np.float64)
+        energy_ab = np.asarray(self._energy_ab, dtype=np.float64)
+        energy_bb = np.asarray(self._energy_bb, dtype=np.float64)
         std = np.asarray(self._std, dtype=np.float64)
-        append_h5_batch(self.writer, positions, times, energy, std)
+        append_h5_batch(
+            self.writer,
+            positions,
+            times,
+            energy,
+            std,
+            energy_aa=energy_aa,
+            energy_ab=energy_ab,
+            energy_bb=energy_bb,
+        )
         if self.on_flush is not None:
             self.on_flush(t_curr)
         self._times.clear()
         self._positions.clear()
         self._energy.clear()
+        self._energy_aa.clear()
+        self._energy_ab.clear()
+        self._energy_bb.clear()
         self._std.clear()
         if self.next_batch_t is not None:
             while self.next_batch_t <= t_curr:
@@ -177,8 +201,8 @@ class _RK23RecordHook:
     def __init__(self, accumulator):
         self.accumulator = accumulator
 
-    def __call__(self, t, r, energy, std):
-        self.accumulator.append(t, r, energy, std)
+    def __call__(self, t, r, energy, std, energy_aa, energy_ab, energy_bb):
+        self.accumulator.append(t, r, energy, std, energy_aa, energy_ab, energy_bb)
 
 
 class _Dop853RecordHook:
@@ -188,7 +212,7 @@ class _Dop853RecordHook:
         self.accumulator = accumulator
         self.last_progress_t = t_start
 
-    def __call__(self, times, positions, energy, std):
+    def __call__(self, times, positions, energy, std, energy_aa, energy_ab, energy_bb):
         if len(times) == 0:
             return
         self.last_state["t"] = float(times[-1])
@@ -197,7 +221,7 @@ class _Dop853RecordHook:
         if delta_t > 0.0:
             self.pbar.update(delta_t)
         self.last_progress_t = self.last_state["t"]
-        self.accumulator.append_batch(times, positions, energy, std)
+        self.accumulator.append_batch(times, positions, energy, std, energy_aa, energy_ab, energy_bb)
 
 
 def _resolve_stream_out_path(config: SimulationConfig, out_path) -> Path:
@@ -375,13 +399,14 @@ def _run_rk23_stream(
     record_hook = _RK23RecordHook(accumulator)
     sample_count = compute_sample_count(config.t_duration, config.save_every)
 
-    r_final, _, _, _, _, rk23_stats = run_rk23_dynamic(
+    r_final, _, _, _, _, _, _, _, rk23_stats = run_rk23_dynamic(
         state["r0"],
         config.k,
         config.v0,
         config.l,
         config.r_floor,
         charges=state["charges"],
+        population_values=config.charge_values,
         t_span=(state["t_start_sim"], state["t_end"]),
         rtol=config.rtol,
         atol=config.atol,
@@ -428,7 +453,7 @@ def _run_dop853_stream(
     )
     dop853_stop = _Dop853StopAdapter(stop_condition)
 
-    r_final, _, _, _, _ = run_dop853_chunked(
+    r_final, _, _, _, _, _, _, _ = run_dop853_chunked(
         state["r0"],
         config.k,
         config.v0,
@@ -445,6 +470,7 @@ def _run_dop853_stream(
         return_arrays=False,
         skip_first=skip_first,
         stop_condition=dop853_stop,
+        population_values=config.charge_values,
     )
     return r_final, {}
 
