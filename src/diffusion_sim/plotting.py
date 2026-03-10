@@ -17,7 +17,7 @@ from .postprocess.energy_components import compute_energy_component_series, comp
 plt.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def plot_energy(sim, scale_time=False):
+def plot_energy(sim, scale_time=False, show=True):
     t_raw = np.asarray(sim["times"])
     e = np.asarray(sim["energy"])
 
@@ -75,6 +75,10 @@ def plot_energy(sim, scale_time=False):
 
     plt.figure(figsize=(8, 4))
     plt.plot(t, e, linewidth=2)
+    print(f"Final energy: {e[-1]:.4g} at final time {t_raw[-1]:.4g}")
+    print(f"Initial energy: {e[1]:.4g} at initial time {t_raw[1]:.4g}")
+    print(f"Middle energy : {e[len(e)//2]:.4g} at middle time {t_raw[len(t_raw)//2]:.4g}")
+    print(f"Energy change: {e[-1] - e[1]:.4g} over time {t_raw[-1] - t_raw[1]:.4g}")
     if scale_time and k is not None:
         plt.xlabel(f"Time (scaled by t^(1/(k+2)) with k={k})")
         plt.ylabel(f"Potential Energy (scaled with k={k})")
@@ -83,7 +87,9 @@ def plot_energy(sim, scale_time=False):
         plt.ylabel("Potential Energy")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.show()
+    if show == True:
+        plt.show()
+    
 
 
 def _energy_components_from_sim(sim):
@@ -282,6 +288,8 @@ def save_mp4(
     axis_padding_frac=0.05,
     t_start=None,
     t_end=None,
+    scale=False,
+    k=None,
 ):
     """
     Save an MP4 of particle motion (no trails) and return the output path.
@@ -290,6 +298,7 @@ def save_mp4(
     """
     r_hist = np.asarray(sim["positions"])
     times = np.asarray(sim.get("times", []))
+    scale_gamma = None
 
     if t_start is not None or t_end is not None:
         if times.size == 0:
@@ -317,6 +326,29 @@ def save_mp4(
 
         r_hist = r_hist[start_idx:end_idx + 1]
         times = times[start_idx:end_idx + 1]
+
+    if scale:
+        if times.size == 0:
+            raise ValueError("scale=True requires sim['times'].")
+        if times.shape[0] != r_hist.shape[0]:
+            raise ValueError("sim['times'] length must match sim['positions'] frames when scale=True.")
+
+        meta = sim.get("meta", {}) or {}
+        k_val = k if k is not None else meta.get("k", None)
+        if k_val is None:
+            raise ValueError("k is required for scale=True (pass k=... or include sim['meta']['k']).")
+        if float(k_val) == -2.0:
+            raise ValueError("k=-2 is invalid for self-similar scaling (division by zero in exponent).")
+
+        gamma = 1.0 / (float(k_val) + 2.0)
+        scale_gamma = gamma
+        positive = times > 0.0
+        if not np.any(positive):
+            raise ValueError("scale=True dropped all frames because all times are <= 0.")
+        r_hist = r_hist[positive]
+        times = times[positive]
+        scale_factors = times ** gamma
+        r_hist = r_hist / scale_factors[:, None, None]
 
     n = r_hist.shape[1]
 
@@ -352,6 +384,9 @@ def save_mp4(
     particles = ax.scatter(r_view[0, :, 0], r_view[0, :, 1],
                            s=marker_size, c=colors)
     t_view = times[::step] if times.size else None
+    t_scaled_view = None
+    if scale and t_view is not None:
+        t_scaled_view = t_view ** scale_gamma
     time_text = ax.text(
         0.02,
         0.98,
@@ -405,12 +440,29 @@ def save_mp4(
         ax.set_ylim(smoothed_cy - smoothed_half, smoothed_cy + smoothed_half)
 
         if t_view is not None and frame_idx < len(t_view):
-            time_text.set_text(f"t = {t_view[frame_idx]:.5f}")
+            if t_scaled_view is not None:
+                time_text.set_text(
+                    f"t = {t_view[frame_idx]:.5f}, "
+                    f"t_scaled = {t_scaled_view[frame_idx]:.5f}"
+                )
+            else:
+                time_text.set_text(f"t = {t_view[frame_idx]:.5f}")
         else:
             time_text.set_text("")
         return (particles, time_text)
 
     ani = FuncAnimation(fig, update, frames=len(r_view), blit=True)
+
+    out_path_obj = Path(out_path)
+    valid_video_suffixes = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
+    if out_path_obj.suffix.lower() not in valid_video_suffixes:
+        fixed_path = out_path_obj.with_suffix(".mp4")
+        print(
+            f"Warning: unsupported video extension '{out_path_obj.suffix}' for save_mp4; "
+            f"using '{fixed_path}'."
+        )
+        out_path_obj = fixed_path
+    out_path = str(out_path_obj)
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     writer = FFMpegWriter(fps=fps, metadata={"artist": "you"}, bitrate=1800)
@@ -432,8 +484,20 @@ def embed_mp4(path, width=600, embed=True):
     return Video(path, width=width, embed=embed)
 
 
-def animate_mp4(sim, out_path="simulation.mp4", fps=30, dpi=120, step=10,
-                marker_size=64, width=600, embed=True, t_start=None, t_end=None):
+def animate_mp4(
+    sim,
+    out_path="simulation.mp4",
+    fps=30,
+    dpi=120,
+    step=10,
+    marker_size=64,
+    width=600,
+    embed=True,
+    t_start=None,
+    t_end=None,
+    scale=False,
+    k=None,
+):
     """
     Convenience: save mp4 then return a Jupyter-embeddable Video object.
     """
@@ -446,6 +510,8 @@ def animate_mp4(sim, out_path="simulation.mp4", fps=30, dpi=120, step=10,
         marker_size=marker_size,
         t_start=t_start,
         t_end=t_end,
+        scale=scale,
+        k=k,
     )
     return embed_mp4(path, width=width, embed=embed)
 

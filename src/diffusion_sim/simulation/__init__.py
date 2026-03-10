@@ -19,6 +19,7 @@ def run_simulation(
     t0=0.0,
     t_duration=1.0,
     save_every=None,
+    save_every_steps=None,
     # progress control
     chunk_steps=5000,
     # batching / resume
@@ -35,6 +36,7 @@ def run_simulation(
     max_step_global=float("inf"),
     eta=0.05,
     recompute_every=10,
+    interpolate_sampling=True,
     diffusion=False,
     diffusion_coeff=0.0,
     diffusion_seed=None,
@@ -54,6 +56,7 @@ def run_simulation(
         t0=t0,
         t_duration=t_duration,
         save_every=save_every,
+        save_every_steps=save_every_steps,
         method=method,
         seed=seed,
         chunk_steps=chunk_steps,
@@ -68,6 +71,7 @@ def run_simulation(
         max_step_global=max_step_global,
         eta=eta,
         recompute_every=recompute_every,
+        interpolate_sampling=interpolate_sampling,
         diffusion=diffusion,
         diffusion_coeff=diffusion_coeff,
         diffusion_seed=diffusion_seed,

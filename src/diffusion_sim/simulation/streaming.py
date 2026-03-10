@@ -356,7 +356,7 @@ def _initialize_stream_state(config: SimulationConfig, *, out_path: Path, config
 def _compute_stream_chunk_len(config: SimulationConfig) -> int:
     chunk_len = 1024
     if config.target_batch_mb is not None:
-        bytes_per_frame = (2 * config.n_particles * 8) + (3 * 8)
+        bytes_per_frame = (2 * config.n_particles * 8) + (6 * 8)
         target_bytes = config.target_batch_mb * 1024 * 1024
         chunk_len = max(1, int(target_bytes // bytes_per_frame))
     return chunk_len
@@ -398,6 +398,7 @@ def _run_rk23_stream(
     )
     record_hook = _RK23RecordHook(accumulator)
     sample_count = compute_sample_count(config.t_duration, config.save_every)
+    metric_every = int(config.save_every_steps) if config.save_every_steps is not None else 1
 
     r_final, _, _, _, _, _, _, _, rk23_stats = run_rk23_dynamic(
         state["r0"],
@@ -414,9 +415,11 @@ def _run_rk23_stream(
         max_step_global=config.max_step_global,
         eta=config.eta,
         recompute_every=config.recompute_every,
+        metric_every=metric_every,
         sample_dt=config.save_every,
         sample_count=sample_count,
         sample_t0=config.t0,
+        interpolate_sampling=config.interpolate_sampling,
         callback=progress_callback,
         record_hook=record_hook,
         record=False,

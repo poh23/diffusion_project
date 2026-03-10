@@ -91,11 +91,14 @@ def _initialize_sampling(
     sample_count,
     sample_t0,
     use_diffusion: bool,
+    interpolate_sampling: bool,
     do_record: bool,
     record: bool,
 ):
-    using_sampling = sample_dt is not None and not use_diffusion
-    record_schedule_dt = sample_dt if use_diffusion and sample_dt is not None else None
+    using_sampling = sample_dt is not None and not use_diffusion and interpolate_sampling
+    record_schedule_dt = (
+        sample_dt if sample_dt is not None and (use_diffusion or not interpolate_sampling) else None
+    )
     base_sample_t0 = t0 if sample_t0 is None else sample_t0
 
     if record_schedule_dt is not None:
@@ -433,6 +436,7 @@ def _setup_rk23_run(
     sample_dt,
     sample_count,
     sample_t0,
+    interpolate_sampling,
     record,
     record_hook,
     method,
@@ -472,6 +476,7 @@ def _setup_rk23_run(
         sample_count=sample_count,
         sample_t0=sample_t0,
         use_diffusion=use_diffusion,
+        interpolate_sampling=interpolate_sampling,
         do_record=do_record,
         record=record,
     )
@@ -709,6 +714,7 @@ def run_rk23_dynamic(
     sample_dt=None,
     sample_count=None,
     sample_t0=None,
+    interpolate_sampling=True,
     callback=None,
     record_hook=None,
     record=True,
@@ -753,6 +759,9 @@ def run_rk23_dynamic(
         If set, record on a uniform time grid with spacing sample_dt using interpolation.
         When diffusion is enabled, interpolation is disabled and the first accepted step
         at or after each sample_dt interval is recorded instead.
+    interpolate_sampling : bool
+        If False, disable interpolation even when diffusion is off and sample_dt is set.
+        In that mode, recording uses the first accepted step at or after each sample time.
     sample_count : int or None
         Number of samples to record when sample_dt is set. If None, it is derived from t_span.
     sample_t0 : float or None
@@ -798,6 +807,7 @@ def run_rk23_dynamic(
         sample_dt=sample_dt,
         sample_count=sample_count,
         sample_t0=sample_t0,
+        interpolate_sampling=interpolate_sampling,
         record=record,
         record_hook=record_hook,
         method=method,

@@ -38,6 +38,9 @@ def run_nonstream_simulation(config: SimulationConfig) -> dict:
     charges = init_charges(config.n_particles, config.charge_values, config.charge_counts, rng)
 
     sample_count = compute_sample_count(config.t_duration, config.save_every)
+    rk23_metric_every = (
+        int(config.save_every_steps) if config.save_every_steps is not None else 1
+    )
 
     # If chunk_steps <= 0, auto-select for nicer tqdm updates
     if config.chunk_steps <= 0 and sample_count is not None:
@@ -70,9 +73,11 @@ def run_nonstream_simulation(config: SimulationConfig) -> dict:
             max_step_global=config.max_step_global,
             eta=config.eta,
             recompute_every=config.recompute_every,
+            metric_every=rk23_metric_every,
             sample_dt=config.save_every,
             sample_count=sample_count,
             sample_t0=config.t0,
+            interpolate_sampling=config.interpolate_sampling,
             callback=progress_callback,
             record=True,
             method="RK23",

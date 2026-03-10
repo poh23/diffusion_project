@@ -83,6 +83,47 @@ class TestRK23Adaptive(unittest.TestCase):
         d1 = _min_pairwise_dist(positions[1], r_floor)
         self.assertGreaterEqual(d1, d0)
 
+    def test_can_disable_sampling_interpolation_without_diffusion(self):
+        r0 = np.array([[0.0, 0.0]], dtype=np.float64)
+        charges = np.ones(1, dtype=np.float64)
+
+        _, _, _, _, _, _, _, times_interp = run_rk23_dynamic(
+            r0,
+            k=1.0,
+            v0=1.0,
+            l=1.0,
+            r_floor=1e-12,
+            charges=charges,
+            t_span=(0.0, 1.0),
+            rtol=1e-6,
+            atol=1e-9,
+            first_step=0.2,
+            max_step_global=0.2,
+            sample_dt=0.1,
+            record=True,
+            interpolate_sampling=True,
+        )
+
+        _, _, _, _, _, _, _, times_no_interp = run_rk23_dynamic(
+            r0,
+            k=1.0,
+            v0=1.0,
+            l=1.0,
+            r_floor=1e-12,
+            charges=charges,
+            t_span=(0.0, 1.0),
+            rtol=1e-6,
+            atol=1e-9,
+            first_step=0.2,
+            max_step_global=0.2,
+            sample_dt=0.1,
+            record=True,
+            interpolate_sampling=False,
+        )
+
+        self.assertEqual(len(times_interp), 11)
+        self.assertLess(len(times_no_interp), len(times_interp))
+
 
 if __name__ == "__main__":
     unittest.main()

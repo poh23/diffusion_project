@@ -49,6 +49,11 @@ def _parse_args():
         type=float,
         help="Sample interval for output (optional; required for dop853).",
     )
+    parser.add_argument(
+        "--save-every-steps",
+        type=int,
+        help="For rk23: record every N accepted steps (mutually exclusive with --save-every).",
+    )
     parser.add_argument("--method", choices=["rk23", "dop853"])
     parser.add_argument("--seed", type=int)
     parser.add_argument("--rtol", type=float, help="Relative tolerance (rk23/dop853).")
@@ -57,6 +62,13 @@ def _parse_args():
     parser.add_argument("--max-step-global", type=float, help="Global max step size (rk23).")
     parser.add_argument("--eta", type=float, help="Safety factor for rk23 distance cap.")
     parser.add_argument("--recompute-every", type=int, help="Recompute rk23 distance cap every N accepted steps.")
+    parser.add_argument(
+        "--no-interpolation",
+        dest="interpolate_sampling",
+        action="store_false",
+        default=None,
+        help="For rk23 with --save-every: disable interpolation and record at accepted steps only.",
+    )
     parser.add_argument(
         "--diffusion",
         action="store_true",
@@ -106,6 +118,7 @@ def _config_from_args(args) -> SimulationConfig:
         "t0": args.t0,
         "t_duration": args.t_duration,
         "save_every": args.save_every,
+        "save_every_steps": args.save_every_steps,
         "method": args.method,
         "seed": args.seed,
         "rtol": args.rtol,
@@ -114,6 +127,7 @@ def _config_from_args(args) -> SimulationConfig:
         "max_step_global": args.max_step_global,
         "eta": args.eta,
         "recompute_every": args.recompute_every,
+        "interpolate_sampling": args.interpolate_sampling,
         "diffusion": args.diffusion,
         "diffusion_coeff": args.diffusion_coeff,
         "diffusion_seed": args.diffusion_seed,
@@ -308,6 +322,8 @@ def _resolve_out_path(config: SimulationConfig, args) -> Path:
     save_tag = ""
     if config.save_every is not None:
         save_tag = f"_save{config.save_every}"
+    elif config.save_every_steps is not None:
+        save_tag = f"_saveSteps{config.save_every_steps}"
     stem = (
         f"{config.method}_N{config.n_particles}_t{config.t_duration}_"
         f"k{config.k}_rtol{config.rtol}_atol{config.atol}"

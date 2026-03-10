@@ -24,6 +24,7 @@ class SimulationConfig:
     t0: float = 0.0
     t_duration: float = 1.0
     save_every: float | None = None
+    save_every_steps: int | None = None
     method: str = "rk23"  # "rk23" or "dop853"
     seed: int = 0
     out_format: str = "npz"
@@ -43,6 +44,7 @@ class SimulationConfig:
     max_step_global: float = np.inf
     eta: float = 0.05
     recompute_every: int = 10
+    interpolate_sampling: bool = True
     # stochastic diffusion (rk23 only)
     diffusion: bool = False
     diffusion_coeff: float = 0.0
@@ -73,6 +75,10 @@ def load_config_file(config_path: Path) -> SimulationConfig:
 
     if "save_every" not in data and "rk23_sample_dt" in data:
         data["save_every"] = data["rk23_sample_dt"]
+    if "save_every_steps" not in data and "save-every-steps" in data:
+        data["save_every_steps"] = data["save-every-steps"]
+    if "interpolate_sampling" not in data and "interpolate-sampling" in data:
+        data["interpolate_sampling"] = data["interpolate-sampling"]
     if "save_every" not in data and "dt" in data:
         data["save_every"] = data["dt"]
 
@@ -94,6 +100,8 @@ def load_config_file(config_path: Path) -> SimulationConfig:
         "charge-counts",
         "rk23_sample_dt",
         "rk23_sample_count",
+        "save-every-steps",
+        "interpolate-sampling",
         "rk23_status_every_steps",
         "rk23_status_every_sec",
         "dt",
@@ -138,6 +146,16 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append("out_format must be one of: npz, h5, hdf5")
     if config.save_every is not None and config.save_every <= 0.0:
         errors.append("save_every must be > 0 when set")
+    if config.save_every_steps is not None:
+        try:
+            save_every_steps_val = float(config.save_every_steps)
+        except (TypeError, ValueError):
+            errors.append("save_every_steps must be a positive integer when set")
+        else:
+            if not save_every_steps_val.is_integer() or int(save_every_steps_val) <= 0:
+                errors.append("save_every_steps must be a positive integer when set")
+    if config.save_every is not None and config.save_every_steps is not None:
+        errors.append("save_every and save_every_steps are mutually exclusive")
     if config.batch_every is not None and config.batch_every <= 0.0:
         errors.append("batch_every must be > 0 when set")
     if config.target_batch_mb is not None and config.target_batch_mb <= 0.0:
@@ -152,6 +170,8 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append("diffusion is only supported with method='rk23'")
     if config.method == "dop853" and config.save_every is None:
         errors.append("save_every must be set for method='dop853'")
+    if config.method == "dop853" and config.save_every_steps is not None:
+        errors.append("save_every_steps is only supported for method='rk23'")
     if (
         config.batch_every is not None
         or config.target_batch_mb is not None

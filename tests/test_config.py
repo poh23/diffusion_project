@@ -25,6 +25,16 @@ class TestConfigValidation(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_config(config)
 
+    def test_save_every_and_save_every_steps_are_mutually_exclusive(self):
+        config = SimulationConfig(method="rk23", save_every=0.1, save_every_steps=10)
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
+    def test_dop853_rejects_save_every_steps(self):
+        config = SimulationConfig(method="dop853", save_every=0.1, save_every_steps=10)
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
 
 if __name__ == "__main__":
     unittest.main()
