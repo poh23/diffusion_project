@@ -162,6 +162,21 @@ Notes
 - RK23 diffusion adds a post-step stochastic displacement when `--diffusion` is enabled.
 - Batching/resume is supported only with `out_format` set to `h5` or `hdf5`.
 
+Plotting Layout
+---------------
+
+Plotting code now lives under `src/diffusion_sim/plotting/` as grouped subpackages:
+
+- `shared_helpers`: internal loaders, charge/directory helpers, and reusable plotting support utilities.
+- `animation_video`: MP4 export and notebook embedding helpers.
+- `energy_metrics`: energy plots, including charge-resolved energy.
+- `mixing_inner_core_structure`: mixing metrics and inner-core self-similar structure plots.
+- `density_profile_plots`: density-vs-radius and scaled density profile plots.
+- `wasserstein_radial_separation_plots`: signed radial Wasserstein metrics and sweep plots.
+- `mean_radial_separation_plots`: signed mean-radius-difference metrics and sweep plots.
+- `radial_comparison`: inner-radius comparison plots and radial force-balance analysis helpers/CLI logic.
+- `std_diagnostics`: standard-deviation and MSD diagnostics.
+
 Future tasks
 ------------
 
