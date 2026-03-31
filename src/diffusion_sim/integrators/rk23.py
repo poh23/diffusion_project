@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit
 from scipy.integrate import RK23, RK45
 
-from ..forces import compute_velocity_overdamped
+from ..forces import compute_total_velocity_overdamped
 from ..metrics import compute_energy_components, compute_std_numba
 
 __all__ = ["run_rk23_dynamic"]
@@ -408,10 +408,29 @@ def _build_stats(*, solver, step_count: int, last_msg, use_diffusion: bool, diff
     return stats
 
 
-def _build_rhs(*, n: int, k, v0, l, r_floor, charges):
+def _build_rhs(
+    *,
+    n: int,
+    k,
+    v0,
+    l,
+    r_floor,
+    charges,
+    external_potential,
+    external_potential_params,
+):
     def rhs(t, y):
         r = y.reshape((n, 2))
-        vel = compute_velocity_overdamped(r, k, v0, l, r_floor, charges)
+        vel = compute_total_velocity_overdamped(
+            r,
+            k,
+            v0,
+            l,
+            r_floor,
+            charges,
+            external_potential=external_potential,
+            external_potential_params=external_potential_params,
+        )
         return vel.reshape(-1)
 
     return rhs
@@ -446,6 +465,8 @@ def _setup_rk23_run(
     diffusion_rng_state,
     diffusion_noise_var,
     population_values,
+    external_potential,
+    external_potential_params,
 ):
     n = r0.shape[0]
     t0, tf = t_span
@@ -481,7 +502,16 @@ def _setup_rk23_run(
         record=record,
     )
 
-    rhs = _build_rhs(n=n, k=k, v0=v0, l=l, r_floor=r_floor, charges=charges)
+    rhs = _build_rhs(
+        n=n,
+        k=k,
+        v0=v0,
+        l=l,
+        r_floor=r_floor,
+        charges=charges,
+        external_potential=external_potential,
+        external_potential_params=external_potential_params,
+    )
     method_upper, solver_cls = _select_solver_class(method)
     solver = solver_cls(
         rhs,
@@ -727,6 +757,8 @@ def run_rk23_dynamic(
     diffusion_noise_var=1.0,
     stop_condition=None,
     population_values=None,
+    external_potential=None,
+    external_potential_params=None,
 ):
     """
     Adaptive RK23 (or RK45) integrator with optional callback and recording.
@@ -817,6 +849,8 @@ def run_rk23_dynamic(
         diffusion_rng_state=diffusion_rng_state,
         diffusion_noise_var=diffusion_noise_var,
         population_values=population_values,
+        external_potential=external_potential,
+        external_potential_params=external_potential_params,
     )
 
     runtime = _integrate_rk23_loop(

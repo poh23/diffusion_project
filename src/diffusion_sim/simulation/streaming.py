@@ -431,6 +431,8 @@ def _run_rk23_stream(
         diffusion_rng_state=state["rng_state"],
         diffusion_noise_var=config.diffusion_noise_var,
         stop_condition=stop_condition,
+        external_potential=config.external_potential,
+        external_potential_params=config.external_potential_params,
     )
     return r_final, (rk23_stats or {})
 
@@ -474,6 +476,8 @@ def _run_dop853_stream(
         skip_first=skip_first,
         stop_condition=dop853_stop,
         population_values=config.charge_values,
+        external_potential=config.external_potential,
+        external_potential_params=config.external_potential_params,
     )
     return r_final, {}
 

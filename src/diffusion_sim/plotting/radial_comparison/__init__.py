@@ -1,8 +1,10 @@
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 
 from ...forces import compute_velocity_overdamped
-from ..shared_helpers import _compute_low_and_high_inner_radii, _get_charge_value_ratio
+from ..shared_helpers import _compute_low_and_high_inner_radii, _get_charge_value_ratio, _load_sim_auto
 
 
 def _infer_rescaled_from_meta(meta: dict) -> bool:
@@ -139,6 +141,187 @@ def plot_inner_radius_ratio_power_vs_charge_value_ratio(directory, time, low_per
     return fig, ax, x_arr, y_arr, t_arr, labels_arr
 
 
+def plot_high_inner_radius_vs_charge_product(
+    directory,
+    time,
+    low_percentile=95.0,
+    high_inner_percentile=5.0,
+    ax=None,
+    show=True,
+):
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise ValueError(f"Expected a directory path, got: {directory}")
+    paths = sorted(
+        path for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in {".npz", ".h5", ".hdf5"}
+    )
+    if not paths:
+        raise ValueError(f"No supported simulation files found in directory: {directory}")
+
+    x_values, y_values, actual_times, labels = [], [], [], []
+    print(f"[plot] computing r2 vs q1*q2 for {len(paths)} file(s)")
+    for index, path in enumerate(paths, start=1):
+        print(f"[plot] processing file {index}/{len(paths)}: {path}")
+        sim = _load_sim_auto(path)
+        if "charges" not in sim:
+            print(f"Warning: missing charges in {path}; skipping.")
+            continue
+        try:
+            charges = np.asarray(sim["charges"], dtype=np.float64)
+            unique = np.unique(charges)
+            if unique.size != 2:
+                raise ValueError(
+                    f"Expected exactly two charge populations, found {unique.size}: {unique.tolist()}"
+                )
+            q1 = float(unique[0])
+            q2 = float(unique[1])
+            x_value = q1 * q2
+            t_used, _, r2 = _compute_low_and_high_inner_radii(
+                sim,
+                time=time,
+                low_percentile=low_percentile,
+                high_inner_percentile=high_inner_percentile,
+            )
+            y_value = float(r2)
+        except ValueError as exc:
+            print(f"Warning: {path}: {exc}; skipping.")
+            continue
+
+        if not np.isfinite(x_value) or not np.isfinite(y_value):
+            print(f"Warning: non-finite q1*q2 or r2 for {path}; skipping.")
+            continue
+
+        x_values.append(x_value)
+        y_values.append(y_value)
+        actual_times.append(t_used)
+        labels.append(path.name)
+
+    if not x_values:
+        raise ValueError("No valid files produced a finite q1*q2 and r2 pair.")
+
+    order = np.argsort(x_values)
+    x_arr = np.asarray(x_values, dtype=np.float64)[order]
+    y_arr = np.asarray(y_values, dtype=np.float64)[order]
+    t_arr = np.asarray(actual_times, dtype=np.float64)[order]
+    labels_arr = np.asarray(labels, dtype=object)[order]
+
+    created_fig = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        created_fig = True
+    else:
+        fig = ax.figure
+
+    ax.plot(x_arr, y_arr, marker="o", linewidth=2)
+    ax.set_xlabel(r"Charge Product $q_1 q_2$")
+    ax.set_ylabel(r"$r_2$")
+    ax.set_title(
+        "Inner High-Charge Radius vs Charge Product\n"
+        f"(target t={float(time):.3g}, low p={low_percentile:g}, high-inner p={high_inner_percentile:g})"
+    )
+    ax.loglog()
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    elif created_fig:
+        plt.close(fig)
+    return fig, ax, x_arr, y_arr, t_arr, labels_arr
+
+
+def plot_low_inner_radius_vs_charge_product(
+    directory,
+    time,
+    low_percentile=95.0,
+    high_inner_percentile=5.0,
+    ax=None,
+    show=True,
+):
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise ValueError(f"Expected a directory path, got: {directory}")
+    paths = sorted(
+        path for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in {".npz", ".h5", ".hdf5"}
+    )
+    if not paths:
+        raise ValueError(f"No supported simulation files found in directory: {directory}")
+
+    x_values, y_values, actual_times, labels = [], [], [], []
+    print(f"[plot] computing r1 vs q1*q2 for {len(paths)} file(s)")
+    for index, path in enumerate(paths, start=1):
+        print(f"[plot] processing file {index}/{len(paths)}: {path}")
+        sim = _load_sim_auto(path)
+        if "charges" not in sim:
+            print(f"Warning: missing charges in {path}; skipping.")
+            continue
+        try:
+            charges = np.asarray(sim["charges"], dtype=np.float64)
+            unique = np.unique(charges)
+            if unique.size != 2:
+                raise ValueError(
+                    f"Expected exactly two charge populations, found {unique.size}: {unique.tolist()}"
+                )
+            q1 = float(unique[0])
+            q2 = float(unique[1])
+            #x_value = q1 * q2
+            x_value =q2/q1
+            t_used, r1, _ = _compute_low_and_high_inner_radii(
+                sim,
+                time=time,
+                low_percentile=low_percentile,
+                high_inner_percentile=high_inner_percentile,
+            )
+            y_value = float(r1)
+        except ValueError as exc:
+            print(f"Warning: {path}: {exc}; skipping.")
+            continue
+
+        if not np.isfinite(x_value) or not np.isfinite(y_value):
+            print(f"Warning: non-finite q1*q2 or r1 for {path}; skipping.")
+            continue
+
+        x_values.append(x_value)
+        y_values.append(y_value)
+        actual_times.append(t_used)
+        labels.append(path.name)
+
+    if not x_values:
+        raise ValueError("No valid files produced a finite q1*q2 and r1 pair.")
+
+    order = np.argsort(x_values)
+    x_arr = np.asarray(x_values, dtype=np.float64)[order]
+    y_arr = np.asarray(y_values, dtype=np.float64)[order]
+    t_arr = np.asarray(actual_times, dtype=np.float64)[order]
+    labels_arr = np.asarray(labels, dtype=object)[order]
+
+    created_fig = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        created_fig = True
+    else:
+        fig = ax.figure
+
+    ax.plot(x_arr, y_arr, marker="o", linewidth=2)
+    ax.set_xlabel(r"Charge ratio $q_2/q_1$")
+    ax.set_ylabel(r"$r_1$")
+    ax.set_title(
+        "Inner Low-Charge Radius vs Charge Ratio\n"
+        f"(target t={float(time):.3g}, low p={low_percentile:g}, high-inner p={high_inner_percentile:g})"
+    )
+    #ax.loglog()
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    elif created_fig:
+        plt.close(fig)
+    return fig, ax, x_arr, y_arr, t_arr, labels_arr
+
+
 def plot_radial_force_balance(sim, frame=None, last_n_frames=20, bins=60, use_rescaled_coords="auto", k=None, ax=None, show=True):
     meta = sim.get("meta", {}) or {}
     positions = np.asarray(sim["positions"], dtype=np.float64)
@@ -268,6 +451,8 @@ __all__ = [
     "_radial_bin_stats",
     "_resolve_frame_indices",
     "_resolve_use_rescaled",
+    "plot_high_inner_radius_vs_charge_product",
+    "plot_low_inner_radius_vs_charge_product",
     "plot_inner_radius_ratio_power_vs_charge_value_ratio",
     "plot_radial_force_balance",
 ]

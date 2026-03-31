@@ -2,7 +2,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from tqdm.auto import tqdm
 
-from ..forces import compute_velocity_overdamped
+from ..forces import compute_total_velocity_overdamped
 from ..metrics import compute_energy_components, compute_std_numba
 
 __all__ = ["run_dop853_chunked"]
@@ -26,6 +26,8 @@ def run_dop853_chunked(
     stop_condition=None,
     charges=None,
     population_values=None,
+    external_potential=None,
+    external_potential_params=None,
 ):
     """
     Chunked DOP853 integration so we can print progress.
@@ -53,7 +55,16 @@ def run_dop853_chunked(
 
     def rhs(t, y):
         r = y.reshape((n, 2))
-        vel = compute_velocity_overdamped(r, k, v0, l, r_floor, charges)
+        vel = compute_total_velocity_overdamped(
+            r,
+            k,
+            v0,
+            l,
+            r_floor,
+            charges,
+            external_potential=external_potential,
+            external_potential_params=external_potential_params,
+        )
         return vel.reshape(-1)
 
     y = r0.reshape(-1).copy()

@@ -86,6 +86,8 @@ def run_nonstream_simulation(config: SimulationConfig) -> dict:
             diffusion_coeff=config.diffusion_coeff,
             diffusion_seed=config.diffusion_seed,
             diffusion_noise_var=config.diffusion_noise_var,
+            external_potential=config.external_potential,
+            external_potential_params=config.external_potential_params,
         )
         pbar.close()
     elif config.method == "dop853":
@@ -105,6 +107,8 @@ def run_nonstream_simulation(config: SimulationConfig) -> dict:
             atol=config.atol,
             chunk_steps=config.chunk_steps,
             population_values=config.charge_values,
+            external_potential=config.external_potential,
+            external_potential_params=config.external_potential_params,
         )
     else:
         raise ValueError("method must be 'rk23' or 'dop853'")

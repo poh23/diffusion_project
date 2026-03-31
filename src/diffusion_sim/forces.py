@@ -1,7 +1,9 @@
 import numpy as np
 from numba import njit, prange
 
-__all__ = ["compute_velocity_overdamped"]
+from .external_potentials import compute_external_velocity
+
+__all__ = ["compute_total_velocity_overdamped", "compute_velocity_overdamped"]
 
 
 @njit(fastmath=True, parallel=True)
@@ -24,3 +26,24 @@ def compute_velocity_overdamped(r, k, v0, l, r_floor, charges):
                 vel[i, 0] += factor * dx
                 vel[i, 1] += factor * dy
     return vel
+
+
+def compute_total_velocity_overdamped(
+    r,
+    k,
+    v0,
+    l,
+    r_floor,
+    charges,
+    *,
+    external_potential=None,
+    external_potential_params=None,
+):
+    vel = compute_velocity_overdamped(r, k, v0, l, r_floor, charges)
+    if external_potential is None:
+        return vel
+    return vel + compute_external_velocity(
+        r,
+        external_potential,
+        external_potential_params,
+    )

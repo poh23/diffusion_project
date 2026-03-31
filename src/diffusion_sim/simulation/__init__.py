@@ -41,6 +41,8 @@ def run_simulation(
     diffusion_coeff=0.0,
     diffusion_seed=None,
     diffusion_noise_var=1.0,
+    external_potential=None,
+    external_potential_params=None,
     out_format="npz",
     out_path=None,
 ):
@@ -76,6 +78,8 @@ def run_simulation(
         diffusion_coeff=diffusion_coeff,
         diffusion_seed=diffusion_seed,
         diffusion_noise_var=diffusion_noise_var,
+        external_potential=external_potential,
+        external_potential_params=external_potential_params,
         out_format=out_format,
     )
     validate_config(config)

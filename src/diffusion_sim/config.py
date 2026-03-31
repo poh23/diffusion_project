@@ -50,6 +50,8 @@ class SimulationConfig:
     diffusion_coeff: float = 0.0
     diffusion_seed: int | None = None
     diffusion_noise_var: float = 1.0
+    external_potential: str | None = None
+    external_potential_params: dict | None = None
 
 
 def load_config_file(config_path: Path) -> SimulationConfig:
@@ -72,6 +74,10 @@ def load_config_file(config_path: Path) -> SimulationConfig:
         data["charge_values"] = data["charge-values"]
     if "charge_counts" not in data and "charge-counts" in data:
         data["charge_counts"] = data["charge-counts"]
+    if "external_potential" not in data and "external-potential" in data:
+        data["external_potential"] = data["external-potential"]
+    if "external_potential_params" not in data and "external-potential-params" in data:
+        data["external_potential_params"] = data["external-potential-params"]
 
     if "save_every" not in data and "rk23_sample_dt" in data:
         data["save_every"] = data["rk23_sample_dt"]
@@ -98,6 +104,8 @@ def load_config_file(config_path: Path) -> SimulationConfig:
         "max-wall-time",
         "charge-values",
         "charge-counts",
+        "external-potential",
+        "external-potential-params",
         "rk23_sample_dt",
         "rk23_sample_count",
         "save-every-steps",
@@ -211,6 +219,34 @@ def validate_config(config: SimulationConfig) -> None:
                 total += count_int
             if total != config.n_particles:
                 errors.append("charge_counts must sum to n_particles")
+    if config.external_potential is not None:
+        if config.external_potential != "harmonic":
+            errors.append("external_potential must be 'harmonic' when set")
+        params = config.external_potential_params
+        if params is None:
+            errors.append("external_potential_params must be set when external_potential is used")
+        elif not isinstance(params, dict):
+            errors.append("external_potential_params must be a JSON object / dict")
+        else:
+            omega = params.get("omega")
+            if omega is None:
+                errors.append("external_potential_params must include 'omega' for harmonic potential")
+            else:
+                try:
+                    float(omega)
+                except (TypeError, ValueError):
+                    errors.append("external_potential_params['omega'] must be a number")
+            if "center" in params:
+                center = params["center"]
+                if not isinstance(center, (list, tuple)) or len(center) != 2:
+                    errors.append("external_potential_params['center'] must be a length-2 list or tuple")
+                else:
+                    for value in center:
+                        try:
+                            float(value)
+                        except (TypeError, ValueError):
+                            errors.append("external_potential_params['center'] values must be numbers")
+                            break
 
     if errors:
         raise ValueError("Invalid SimulationConfig: " + "; ".join(errors))

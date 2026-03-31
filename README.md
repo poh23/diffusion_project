@@ -147,10 +147,41 @@ All CLI options map to fields in `SimulationConfig`. Example:
   "diffusion_coeff": 0.05,
   "diffusion_seed": 123,
   "diffusion_noise_var": 1.0,
+  "external_potential": "harmonic",
+  "external_potential_params": {
+    "omega": 0.5,
+    "center": [0.0, 0.0]
+  },
   "batch_every": 0.5,
   "target_batch_mb": 64.0
 }
 ```
+
+External potential
+------------------
+
+An optional one-body external potential can be added on top of the pairwise interaction through the JSON config.
+
+Currently supported:
+
+- `external_potential: "harmonic"`
+- `external_potential_params`:
+  - `omega` required
+  - `center` optional, defaults to `[0.0, 0.0]`
+
+Example:
+
+```json
+{
+  "external_potential": "harmonic",
+  "external_potential_params": {
+    "omega": 0.5,
+    "center": [0.0, 0.0]
+  }
+}
+```
+
+This adds a harmonic trap centered at `center`.
 
 Notes
 -----
@@ -161,6 +192,8 @@ Notes
 - For DOP853, `save_every` is required to define the output sampling grid.
 - RK23 diffusion adds a post-step stochastic displacement when `--diffusion` is enabled.
 - Batching/resume is supported only with `out_format` set to `h5` or `hdf5`.
+- The external potential is applied in the dynamics when configured through `external_potential` and `external_potential_params`.
+- Current saved `energy` remains the existing pairwise energy quantity; external-potential energy is not yet added to that field.
 
 Plotting Layout
 ---------------

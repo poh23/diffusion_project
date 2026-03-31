@@ -16,7 +16,9 @@ from .mixing_inner_core_structure import (
     plot_mixing_metric,
 )
 from .radial_comparison import (
+    plot_high_inner_radius_vs_charge_product,
     plot_inner_radius_ratio_power_vs_charge_value_ratio,
+    plot_low_inner_radius_vs_charge_product,
     plot_radial_force_balance,
 )
 from .std_diagnostics import plot_msd_by_charge, plot_std
@@ -36,8 +38,10 @@ __all__ = [
     "plot_density_vs_radius",
     "plot_energy",
     "plot_energy_by_charge",
+    "plot_high_inner_radius_vs_charge_product",
     "plot_inner_particles_selfsimilar_radius",
     "plot_inner_radius_ratio_power_vs_charge_value_ratio",
+    "plot_low_inner_radius_vs_charge_product",
     "plot_mixing_metric",
     "plot_msd_by_charge",
     "plot_radial_force_balance",
