@@ -386,6 +386,40 @@ Other notebooks currently in the repo:
 If you add a new paired notebook, keep the `.py` and `.ipynb` files together and
 prefer committing the `.py` as the canonical review surface.
 
+Downloading Simulation Outputs and Videos
+-----------------------------------------
+
+Generated simulation files and rendered videos are stored on the lab machine:
+
+- host: `faulkner.tau.ac.il`
+- user: `naomi`
+- project path: `~/Documents/maya/diffusion_project`
+
+Relevant remote directories:
+
+- `~/Documents/maya/diffusion_project/data/`: previous simulation outputs
+- `~/Documents/maya/diffusion_project/videos/`: rendered `.mp4` files
+
+Typical usage:
+
+- Copy the whole `data/` or `videos/` directory to your computer if you want a full local mirror.
+- Or copy only the specific files you need for a given analysis notebook.
+- The notebook cells usually show the exact `data/...` or `videos/...` path used by that analysis, so you can search by the filename referenced in the cell and transfer only those files.
+
+Example `scp` commands:
+
+```bash
+scp -r naomi@faulkner.tau.ac.il:~/Documents/maya/diffusion_project/data ./data
+scp -r naomi@faulkner.tau.ac.il:~/Documents/maya/diffusion_project/videos ./videos
+```
+
+To copy a single file instead:
+
+```bash
+scp naomi@faulkner.tau.ac.il:~/Documents/maya/diffusion_project/videos/<your_video>.mp4 ./videos/
+scp naomi@faulkner.tau.ac.il:~/Documents/maya/diffusion_project/data/<your_run>.h5 ./data/
+```
+
 Testing
 -------
 
