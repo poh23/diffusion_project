@@ -340,7 +340,10 @@ Project Structure
 `-- notebooks and analysis files
     |-- integrator_k_comparison.ipynb
     |-- single_pop_analysis.ipynb
-    |-- two_pop_analysis.ipynb
+    |-- two_pop_analysis_overview.ipynb
+    |-- two_pop_analysis_k3_variants.ipynb
+    |-- two_pop_analysis_high_charge.ipynb
+    |-- two_pop_analysis_power_laws.ipynb
     |-- two_pop_analysis_k0.ipynb
     `-- two_pop_analysis_k_comparison.ipynb
 ```
@@ -359,6 +362,29 @@ Directory guide:
 - `graphs/`: generated figures.
 - `videos/`: generated animations.
 - notebooks: exploratory analysis and figure-generation workflows.
+
+Notebooks
+---------
+
+The repository uses Jupytext for the newer two-population analysis notebooks.
+Those notebooks are paired as `.ipynb` and `.py` files in `py:percent` format.
+
+Current paired notebook set:
+
+- `two_pop_analysis_overview.ipynb` / `two_pop_analysis_overview.py`: overview notebook for the smaller and baseline two-population runs, including early `N=100`, `N=350`, and initial `N=700` examples.
+- `two_pop_analysis_k3_variants.ipynb` / `two_pop_analysis_k3_variants.py`: `k=3` two-population runs comparing different seeds, diffusion strengths, and initial-radius variations.
+- `two_pop_analysis_high_charge.ipynb` / `two_pop_analysis_high_charge.py`: high-charge-ratio cases such as `q=20` and `q=100`, with energy, standard deviation, density, and saved-video views.
+- `two_pop_analysis_power_laws.ipynb` / `two_pop_analysis_power_laws.py`: comparisons across different power-law exponents, mainly `k=1`, `k=0`, and `k=-1`.
+
+Other notebooks currently in the repo:
+
+- `single_pop_analysis.ipynb`: exploratory analysis for one-population simulations.
+- `integrator_k_comparison.ipynb`: integrator and parameter-comparison notebook.
+- `two_pop_analysis_k0.ipynb`: older focused notebook for the `k=0` two-population case.
+- `two_pop_analysis_k_comparison.ipynb`: older large notebook comparing several `k` values in two-population runs.
+
+If you add a new paired notebook, keep the `.py` and `.ipynb` files together and
+prefer committing the `.py` as the canonical review surface.
 
 Testing
 -------
