@@ -1,173 +1,258 @@
 diffusion-project
 =================
 
-Simulation arguments and parameters
------------------------------------
+`diffusion-project` simulates a 2D overdamped interacting-particle system with
+optional Brownian diffusion. The code supports the original one-population
+workflow and the newer two-population workflow, both through the same CLI.
 
-This project runs simulations via the package CLI. You can configure runs with
-command-line arguments or a JSON config file.
+The main entry point is `diffusion_sim.cli`, exposed as the installed command
+`diffusion-sim`.
+
+Features
+--------
+
+- Overdamped pairwise dynamics with power-law interactions.
+- Optional stochastic diffusion in the `rk23` workflow.
+- One-population runs with uniform charge.
+- Two-population runs with user-defined charge values and counts.
+- Adaptive solvers: `rk23` and `dop853`.
+- Output to NPZ or HDF5, with HDF5 batching and resume support.
+- Post-processing CLIs for density and energy diagnostics.
+
+Installation
+------------
+
+Project-standard setup uses `uv`:
+
+```bash
+uv sync
+```
+
+For notebooks and other dev tools:
+
+```bash
+uv sync --group dev
+```
+
+If you prefer the installed CLI outside `uv run`, install the package in your
+environment first:
+
+```bash
+pip install -e .
+```
 
 Command-line usage
 ------------------
 
-Basic (module):
+With `uv`:
 
 ```bash
-python -m diffusion_sim.cli --method rk23 --n-particles 100 --t-duration 0.5 --save-every 1e-3
+uv run diffusion-sim --method rk23 --n-particles 100 --t-duration 0.5 --save-every 1e-3
 ```
 
-Installed CLI (after `pip install -e .`):
+Module form:
+
+```bash
+uv run python -m diffusion_sim.cli --method rk23 --n-particles 100 --t-duration 0.5 --save-every 1e-3
+```
+
+Installed CLI form:
 
 ```bash
 diffusion-sim --method rk23 --n-particles 100 --t-duration 0.5 --save-every 1e-3
 ```
 
-Config file:
+Run One-Population Simulations
+------------------------------
+
+The current code treats one-population runs as the default mode. Do not provide
+`charge_values` or `charge_counts`. Internally, the simulation assigns every
+particle charge `1.0`.
+
+Example with `uv run`:
 
 ```bash
-python -m diffusion_sim.cli --config config.json
+uv run diffusion-sim --method rk23 --n-particles 350 --t-duration 5.0 --save-every 1e-4
 ```
 
-Core arguments
---------------
-
-- `--config`: Path to a JSON config file (matches `SimulationConfig` fields).
-- `--out`: Output `.npz` path (default: `data/YYYYMMDD/<method>_N<N>_t<T>_k<k>_rtol<rtol>_atol<atol>_save<save_every>.npz`). Use `.h5` or `.hdf5` to save in HDF5 format.
-- `--out-format`: Controls the default output suffix when `--out` is not provided (`npz`, `h5`, or `hdf5`). Can also be set in JSON config as `out_format`.
-- `--n-particles`: Number of particles (`n_particles`).
-- `--k`: Power-law exponent.
-- `--v0`: Coupling prefactor.
-- `--l`: Length scale (usually `1.0`).
-- `--r-floor`: Hard distance floor for interactions.
-- `--init-radius`: Initial disk radius for particle placement.
-- `--charge-values`: Charge values for two populations (positive).
-- `--charge-counts`: Particle counts for the two charge populations (sum to `n_particles`).
-- `--t0`: Initial time.
-- `--t-duration`: Total integration time.
-- `--save-every`: Sample interval for output (optional for RK23; required for DOP853). If omitted, RK23 records accepted steps.
-- `--method`: One of `rk23`, `dop853`.
-- `--seed`: RNG seed for initialization.
-
-Adaptive tolerances
--------------------
-
-- `--rtol`: Relative tolerance (rk23/dop853).
-- `--atol`: Absolute tolerance (rk23/dop853).
-
-RK23 adaptive options
----------------------
-
-- `--first-step`: Initial step size guess.
-- `--max-step-global`: Global max step size.
-- `--eta`: Safety factor for distance-based max step cap.
-- `--recompute-every`: Recompute distance-based cap every N accepted steps.
-- `--diffusion`: Enable stochastic diffusion step (rk23 only).
-- `--diffusion-coeff`: Diffusion constant `D` used in the stochastic step.
-- `--diffusion-seed`: RNG seed for the diffusion term.
-- `--diffusion-noise-var`: Variance of the Gaussian noise used in the diffusion step.
-
-If `save_every` is not set, RK23 returns data at accepted solver steps (no interpolation).
-When diffusion is enabled, interpolation is disabled; if `save_every` is set it
-records the first accepted step at or after each interval (no interpolation).
-
-RK23 diffusion example:
+Equivalent module form:
 
 ```bash
-python -m diffusion_sim.cli --method rk23 --t-duration 0.5 --save-every 1e-3 --diffusion --diffusion-coeff 0.05 --diffusion-seed 123
+uv run python -m diffusion_sim.cli --method rk23 --n-particles 350 --t-duration 5.0 --save-every 1e-4
 ```
 
-Batching / resume (HDF5 only)
------------------------------
-
-- `--batch-every`: Sim-time interval between batch flushes.
-- `--target-batch-mb`: Target batch size in MB.
-- `--max-wall-time`: Stop after this many seconds (checkpoint and exit).
-- `--resume-from`: Resume from an existing HDF5 file.
-- `--resume-force`: Resume even if config mismatch.
-
-Example (batch + resume):
-
-```bash
-diffusion-sim --config config_rk23.json --out data/run.h5 --batch-every 0.5 --target-batch-mb 64
-diffusion-sim --resume-from data/run.h5 --t-duration 10.0
-```
-
-Density post-processing
------------------------
-
-Density is computed as a post-process step using the standalone CLI below.
-
-Standalone density CLI
-----------------------
-
-After `pip install -e .`, you can run:
-
-```bash
-diffusion-density data/20260120/your_run.npz --suffix _with_density --print-every 10
-```
-
-To overwrite in place:
-
-```bash
-diffusion-density data/20260120/your_run.npz --overwrite
-```
-
-To compute density every N steps:
-
-```bash
-diffusion-density data/20260120/your_run.npz --stride 10
-```
-
-HDF5 files are also supported:
-
-```bash
-diffusion-density data/20260121/your_run.h5 --stride 10
-```
-
-Config file fields (JSON)
--------------------------
-
-All CLI options map to fields in `SimulationConfig`. Example:
+One-population JSON config example:
 
 ```json
 {
-  "n_particles": 100,
+  "method": "rk23",
+  "n_particles": 350,
   "k": 3.0,
   "v0": 1.0,
   "l": 1.0,
-  "r_floor": 1e-12,
-  "t_duration": 0.5,
-  "save_every": 1e-3,
-  "method": "rk23",
-  "charge_values": [1.0, 2.0],
-  "charge_counts": [60, 40],
-  "rtol": 1e-6,
-  "atol": 1e-6,
+  "r_floor": 1e-7,
+  "init_radius": 0.1,
+  "t_duration": 5.0,
+  "save_every": 1e-4,
+  "rtol": 1e-3,
+  "atol": 1e-3,
   "diffusion": true,
-  "diffusion_coeff": 0.05,
-  "diffusion_seed": 123,
-  "diffusion_noise_var": 1.0,
-  "external_potential": "harmonic",
-  "external_potential_params": {
-    "omega": 0.5,
-    "center": [0.0, 0.0]
-  },
-  "batch_every": 0.5,
-  "target_batch_mb": 64.0
+  "diffusion_coeff": 5.0,
+  "diffusion_seed": 1,
+  "out_format": "h5"
 }
 ```
 
-External potential
+Run from config:
+
+```bash
+uv run diffusion-sim --config config_rk23.json
+uv run python -m diffusion_sim.cli --config config_rk23.json
+```
+
+Run Two-Population Simulations
+------------------------------
+
+Two-population mode is enabled only when both `charge_values` and
+`charge_counts` are provided. The current code requires exactly two charge
+values and exactly two counts, and the counts must sum to `n_particles`.
+
+CLI example:
+
+```bash
+uv run diffusion-sim --method rk23 --n-particles 1000 --t-duration 10.0 --save-every 1e-7 --charge-values 1.0 1.0 --charge-counts 900 100
+```
+
+Equivalent module form:
+
+```bash
+uv run python -m diffusion_sim.cli --method rk23 --n-particles 1000 --t-duration 10.0 --save-every 1e-7 --charge-values 1.0 1.0 --charge-counts 900 100
+```
+
+Two-population JSON config example:
+
+```json
+{
+  "method": "rk23",
+  "n_particles": 1000,
+  "k": -1.0,
+  "v0": 1.0,
+  "l": 1.0,
+  "r_floor": 1e-7,
+  "init_radius": 0.5,
+  "t_duration": 10.0,
+  "save_every": 1e-7,
+  "max_step_global": 1e-3,
+  "seed": 1,
+  "eta": 100.0,
+  "rtol": 1e-3,
+  "atol": 1e-3,
+  "charge_values": [1.0, 1.0],
+  "charge_counts": [900, 100],
+  "diffusion": false,
+  "out_format": "h5"
+}
+```
+
+Run from config:
+
+```bash
+uv run diffusion-sim --config config_rk23_two_species.json
+uv run python -m diffusion_sim.cli --config config_rk23_two_species.json
+```
+
+Core Arguments
+--------------
+
+- `--config`: Path to a JSON config file matching `SimulationConfig`.
+- `--out`: Output `.npz`, `.h5`, or `.hdf5` path.
+- `--out-format`: Default output format when `--out` is not provided.
+- `--n-particles`: Number of particles.
+- `--k`: Power-law exponent.
+- `--v0`: Coupling prefactor.
+- `--l`: Length scale.
+- `--r-floor`: Minimum effective pair distance.
+- `--init-radius`: Initial disk radius for particle placement.
+- `--t0`: Initial simulation time.
+- `--t-duration`: Total integration time.
+- `--save-every`: Sample interval for saved output.
+- `--save-every-steps`: For `rk23`, save every N accepted steps.
+- `--method`: `rk23` or `dop853`.
+- `--seed`: RNG seed for initialization.
+- `--charge-values`: Two positive charge values for two-population runs.
+- `--charge-counts`: Two population sizes for two-population runs.
+
+Adaptive and Diffusion Options
+------------------------------
+
+- `--rtol`: Relative tolerance.
+- `--atol`: Absolute tolerance.
+- `--first-step`: Initial `rk23` step guess.
+- `--max-step-global`: Global maximum step size for `rk23`.
+- `--eta`: Safety factor for the `rk23` distance cap.
+- `--recompute-every`: Recompute the `rk23` distance cap every N accepted steps.
+- `--no-interpolation`: Disable interpolation when sampling `rk23` with `--save-every`.
+- `--diffusion`: Enable stochastic diffusion for `rk23`.
+- `--diffusion-coeff`: Diffusion constant `D`.
+- `--diffusion-seed`: RNG seed for the diffusion term.
+- `--diffusion-noise-var`: Variance of the Gaussian diffusion noise.
+
+Notes:
+
+- `dop853` requires `--save-every`.
+- `save_every` and `save_every_steps` are mutually exclusive.
+- Diffusion is supported only with `rk23`.
+- When diffusion is enabled, interpolation-based sampling is disabled.
+
+Batching and Resume
+-------------------
+
+These options are supported only with HDF5 output.
+
+- `--batch-every`: Simulated-time interval between flushes.
+- `--target-batch-mb`: Target batch size in MB.
+- `--max-wall-time`: Stop after this many wall-clock seconds and checkpoint.
+- `--resume-from`: Resume from an existing HDF5 run.
+- `--resume-force`: Resume even if config metadata differs.
+
+Example:
+
+```bash
+uv run diffusion-sim --config config_rk23.json --out data/run.h5 --batch-every 0.5 --target-batch-mb 64
+uv run diffusion-sim --resume-from data/run.h5 --t-duration 10.0
+```
+
+Post-processing CLIs
+--------------------
+
+Density:
+
+```bash
+uv run diffusion-density data/20260120/your_run.npz --suffix _with_density --print-every 10
+uv run diffusion-density data/20260120/your_run.h5 --stride 10
+```
+
+Energy:
+
+```bash
+uv run diffusion-energy data/20260120/your_run.h5
+```
+
+External Potential
 ------------------
 
-An optional one-body external potential can be added on top of the pairwise interaction through the JSON config.
-
+An optional one-body external potential can be added through the JSON config.
 Currently supported:
 
 - `external_potential: "harmonic"`
-- `external_potential_params`:
-  - `omega` required
-  - `center` optional, defaults to `[0.0, 0.0]`
+- `external_potential_params["omega"]` required
+- `external_potential_params["center"]` optional, defaults to `[0.0, 0.0]`
+
+For the harmonic case, the potential is:
+
+`V(x) = omega * |x - center|^2`
+
+If `center` is omitted, it defaults to `[0.0, 0.0]`.
 
 Example:
 
@@ -181,36 +266,116 @@ Example:
 }
 ```
 
-This adds a harmonic trap centered at `center`.
+Project Structure
+-----------------
+
+```text
+.
+|-- AGENTS.md
+|-- README.md
+|-- Q&A.md
+|-- pyproject.toml
+|-- uv.lock
+|-- config_rk23.json
+|-- config_rk23_two_species.json
+|-- src/
+|   `-- diffusion_sim/
+|       |-- __init__.py
+|       |-- cli.py
+|       |-- config.py
+|       |-- density_cli.py
+|       |-- energy_cli.py
+|       |-- external_potentials.py
+|       |-- forces.py
+|       |-- init_conditions.py
+|       |-- metrics.py
+|       |-- integrators/
+|       |   |-- __init__.py
+|       |   |-- dop853.py
+|       |   |-- rk23.py
+|       |   |-- rk2.py
+|       |   `-- rk4.py
+|       |-- io/
+|       |   |-- __init__.py
+|       |   |-- h5.py
+|       |   |-- h5_batch.py
+|       |   `-- npz.py
+|       |-- plotting/
+|       |   |-- __init__.py
+|       |   |-- animation_video/
+|       |   |-- density_profile_plots/
+|       |   |-- energy_metrics/
+|       |   |-- mean_radial_separation_plots/
+|       |   |-- mixing_inner_core_structure/
+|       |   |-- radial_comparison/
+|       |   |-- shared_helpers/
+|       |   |-- std_diagnostics/
+|       |   `-- wasserstein_radial_separation_plots/
+|       |-- postprocess/
+|       |   |-- __init__.py
+|       |   |-- density_voronoi.py
+|       |   `-- energy_components.py
+|       `-- simulation/
+|           |-- __init__.py
+|           |-- helpers.py
+|           |-- nonstream.py
+|           `-- streaming.py
+|-- tests/
+|   |-- test_cli_sweep.py
+|   |-- test_config.py
+|   |-- test_density_cli.py
+|   |-- test_external_potentials.py
+|   |-- test_integrators.py
+|   |-- test_io.py
+|   |-- test_plotting_radial_wasserstein.py
+|   `-- test_rk23.py
+|-- scripts/
+|   |-- __init__.py
+|   `-- compare_solvers.py
+|-- data/
+|   `-- refactor_baseline/
+|       `-- rk23_charged_small_baseline_fingerprint.json
+|-- graphs/
+|-- videos/
+`-- notebooks and analysis files
+    |-- integrator_k_comparison.ipynb
+    |-- single_pop_analysis.ipynb
+    |-- two_pop_analysis.ipynb
+    |-- two_pop_analysis_k0.ipynb
+    `-- two_pop_analysis_k_comparison.ipynb
+```
+
+Directory guide:
+
+- `src/diffusion_sim/`: main package code for simulation, IO, plotting, and post-processing.
+- `src/diffusion_sim/integrators/`: solver implementations and wrappers.
+- `src/diffusion_sim/io/`: NPZ/HDF5 save, load, batching, and resume helpers.
+- `src/diffusion_sim/simulation/`: orchestration code for streaming and non-streaming runs.
+- `src/diffusion_sim/plotting/`: plotting and diagnostic modules grouped by analysis type.
+- `src/diffusion_sim/postprocess/`: offline analysis helpers used by CLIs and plotting.
+- `tests/`: regression and behavior tests for config, IO, integrators, plotting, and CLI features.
+- `scripts/`: ad hoc utility scripts.
+- `data/`: sample or generated run outputs and saved baselines.
+- `graphs/`: generated figures.
+- `videos/`: generated animations.
+- notebooks: exploratory analysis and figure-generation workflows.
+
+Testing
+-------
+
+Run the test suite with:
+
+```bash
+uv run pytest
+```
 
 Notes
 -----
 
-- `k=0` uses the logarithmic potential energy (limit of the power-law form).
-- Pairwise forces/energy are scaled by `q_i * q_j` when charges are provided.
-- For RK23, sampling is optional and controlled by `save_every`.
-- For DOP853, `save_every` is required to define the output sampling grid.
-- RK23 diffusion adds a post-step stochastic displacement when `--diffusion` is enabled.
-- Batching/resume is supported only with `out_format` set to `h5` or `hdf5`.
-- The external potential is applied in the dynamics when configured through `external_potential` and `external_potential_params`.
-- Current saved `energy` remains the existing pairwise energy quantity; external-potential energy is not yet added to that field.
-
-Plotting Layout
----------------
-
-Plotting code now lives under `src/diffusion_sim/plotting/` as grouped subpackages:
-
-- `shared_helpers`: internal loaders, charge/directory helpers, and reusable plotting support utilities.
-- `animation_video`: MP4 export and notebook embedding helpers.
-- `energy_metrics`: energy plots, including charge-resolved energy.
-- `mixing_inner_core_structure`: mixing metrics and inner-core self-similar structure plots.
-- `density_profile_plots`: density-vs-radius and scaled density profile plots.
-- `wasserstein_radial_separation_plots`: signed radial Wasserstein metrics and sweep plots.
-- `mean_radial_separation_plots`: signed mean-radius-difference metrics and sweep plots.
-- `radial_comparison`: inner-radius comparison plots and radial force-balance analysis helpers/CLI logic.
-- `std_diagnostics`: standard-deviation and MSD diagnostics.
-
-Future tasks
-------------
-
-- (none)
+- `k = 0` uses the logarithmic potential-energy form.
+- Two-population mode currently supports exactly two populations, not an arbitrary
+  number of species.
+- If `charge_values` and `charge_counts` are omitted, the run is treated as a
+  one-population simulation with uniform unit charge.
+- Output is written to NPZ by default unless `--out-format` or an HDF5 output
+  path is used.
