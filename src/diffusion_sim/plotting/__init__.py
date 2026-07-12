@@ -20,6 +20,7 @@ from .radial_comparison import (
     plot_inner_radius_ratio_power_vs_charge_value_ratio,
     plot_low_inner_radius_vs_charge_product,
     plot_radial_force_balance,
+    plot_special_radius_ratio_vs_charge_population_ratio,
 )
 from .std_diagnostics import plot_msd_by_charge, plot_std
 from .wasserstein_radial_separation_plots import (
@@ -53,6 +54,7 @@ __all__ = [
     "plot_signed_mean_radius_difference_vs_ratio",
     "plot_signed_radial_wasserstein",
     "plot_signed_radial_wasserstein_vs_ratio",
+    "plot_special_radius_ratio_vs_charge_population_ratio",
     "plot_std",
     "save_mp4",
 ]

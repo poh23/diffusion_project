@@ -231,6 +231,136 @@ def plot_high_inner_radius_vs_charge_product(
     return fig, ax, x_arr, y_arr, t_arr, labels_arr
 
 
+def plot_special_radius_ratio_vs_charge_population_ratio(
+    directory,
+    time,
+    low_percentile=95.0,
+    high_inner_percentile=5.0,
+    high_outer_percentile=95.0,
+    ax=None,
+    show=True,
+):
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise ValueError(f"Expected a directory path, got: {directory}")
+    paths = sorted(
+        path for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in {".npz", ".h5", ".hdf5"}
+    )
+    if not paths:
+        raise ValueError(f"No supported simulation files found in directory: {directory}")
+
+    if not (0.0 <= low_percentile <= 100.0):
+        raise ValueError("low_percentile must satisfy 0 <= low_percentile <= 100.")
+    if not (0.0 <= high_inner_percentile <= 100.0):
+        raise ValueError("high_inner_percentile must satisfy 0 <= high_inner_percentile <= 100.")
+    if not (0.0 <= high_outer_percentile <= 100.0):
+        raise ValueError("high_outer_percentile must satisfy 0 <= high_outer_percentile <= 100.")
+
+    x_values, y_values, actual_times, labels = [], [], [], []
+    print(f"[plot] computing (((pi/2) - 1) * r2 + r3) / r1 for {len(paths)} file(s)")
+    for index, path in enumerate(paths, start=1):
+        print(f"[plot] processing file {index}/{len(paths)}: {path}")
+        sim = _load_sim_auto(path)
+        if "charges" not in sim:
+            print(f"Warning: missing charges in {path}; skipping.")
+            continue
+        try:
+            sim_times = np.asarray(sim["times"], dtype=np.float64)
+            positions = np.asarray(sim["positions"], dtype=np.float64)
+            charges = np.asarray(sim["charges"], dtype=np.float64)
+            unique = np.unique(charges)
+            if unique.size != 2:
+                raise ValueError(
+                    f"Expected exactly two charge populations, found {unique.size}: {unique.tolist()}"
+                )
+
+            q_low = float(unique[0])
+            q_high = float(unique[1])
+            low_mask = np.isclose(charges, q_low)
+            high_mask = np.isclose(charges, q_high)
+            n_low = int(np.count_nonzero(low_mask))
+            n_high = int(np.count_nonzero(high_mask))
+            if n_low == 0 or n_high == 0:
+                raise ValueError("One of the charge populations is empty.")
+
+            idx = int(np.abs(sim_times - time).argmin())
+            t_used = float(sim_times[idx])
+            r = np.linalg.norm(positions[idx], axis=1)
+            r_low = r[low_mask]
+            r_high = r[high_mask]
+
+            r1 = float(np.percentile(r_low, low_percentile))
+            r2 = float(np.percentile(r_high, high_inner_percentile))
+            r3 = float(np.percentile(r_high, high_outer_percentile))
+            if r1 <= 0.0:
+                raise ValueError("r1 is non-positive, cannot form special radius ratio.")
+
+            x_value = float(n_high / n_low)
+            y_value = float(((np.pi / 2.0 - 1.0) * r2 + r3) / r1)
+        except ValueError as exc:
+            print(f"Warning: {path}: {exc}; skipping.")
+            continue
+
+        if not np.isfinite(x_value) or not np.isfinite(y_value):
+            print(f"Warning: non-finite population ratio or special radius ratio for {path}; skipping.")
+            continue
+
+        x_values.append(x_value)
+        y_values.append(y_value)
+        actual_times.append(t_used)
+        labels.append(path.name)
+
+    if not x_values:
+        raise ValueError("No valid files produced a finite population ratio and special radius ratio pair.")
+
+    order = np.argsort(x_values)
+    x_arr = np.asarray(x_values, dtype=np.float64)[order]
+    y_arr = np.asarray(y_values, dtype=np.float64)[order]
+    t_arr = np.asarray(actual_times, dtype=np.float64)[order]
+    labels_arr = np.asarray(labels, dtype=object)[order]
+
+    created_fig = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        created_fig = True
+    else:
+        fig = ax.figure
+
+    ax.plot(x_arr, y_arr, marker="o", linewidth=2, label="Numerical")
+    ax.plot(x_arr, x_arr, "k--", linewidth=1.5, alpha=0.7, label=r"$y = N_{\mathrm{high}} / N_{\mathrm{low}}$")
+    if x_arr.size >= 2 and np.unique(x_arr).size >= 2:
+        slope, intercept = np.polyfit(x_arr, y_arr, deg=1)
+        fit_x = np.linspace(float(np.min(x_arr)), float(np.max(x_arr)), 200)
+        fit_y = slope * fit_x + intercept
+        ax.plot(
+            fit_x,
+            fit_y,
+            color="tab:red",
+            linestyle="-",
+            linewidth=1.8,
+            label=rf"Fit: $y = {slope:.3g}x {intercept:+.3g}$",
+        )
+    else:
+        print("Warning: need at least two distinct population ratios to plot a linear fit.")
+    ax.set_xlabel(r"Population Ratio $N_{\mathrm{high}} / N_{\mathrm{low}}$")
+    ax.set_ylabel(r"$\left(((\pi/2)-1)r_2 + r_3\right) / r_1$")
+    ax.set_title(
+        "Special Radius Ratio vs Charge-Population Ratio\n"
+        f"(target t={float(time):.3g}, low p={low_percentile:g}, "
+        f"high-inner p={high_inner_percentile:g}, high-outer p={high_outer_percentile:g})"
+    )
+    ax.grid(True, alpha=0.3)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    elif created_fig:
+        plt.close(fig)
+    return fig, ax, x_arr, y_arr, t_arr, labels_arr
+
+
 def plot_low_inner_radius_vs_charge_product(
     directory,
     time,
@@ -455,4 +585,5 @@ __all__ = [
     "plot_low_inner_radius_vs_charge_product",
     "plot_inner_radius_ratio_power_vs_charge_value_ratio",
     "plot_radial_force_balance",
+    "plot_special_radius_ratio_vs_charge_population_ratio",
 ]
