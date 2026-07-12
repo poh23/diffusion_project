@@ -5,14 +5,13 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from ..config import SimulationConfig
-from ..init_conditions import init_positions_jittered_disk
 from ..integrators.dop853 import run_dop853_chunked
 from ..integrators.rk23 import run_rk23_dynamic
 from .helpers import (
     auto_chunk_steps,
     build_nonstream_meta,
     compute_sample_count,
-    init_charges,
+    init_fresh_positions_and_charges,
 )
 
 
@@ -30,12 +29,7 @@ class _RK23ProgressCallback:
 
 def run_nonstream_simulation(config: SimulationConfig) -> dict:
     rng = np.random.default_rng(config.seed)
-    r0 = init_positions_jittered_disk(
-        config.n_particles,
-        radius=config.init_radius,
-        rng=rng,
-    )
-    charges = init_charges(config.n_particles, config.charge_values, config.charge_counts, rng)
+    r0, charges = init_fresh_positions_and_charges(config, rng)
 
     sample_count = compute_sample_count(config.t_duration, config.save_every)
     rk23_metric_every = (

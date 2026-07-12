@@ -18,6 +18,7 @@ class SimulationConfig:
     l: float = 1.0
     r_floor: float = DEFAULT_R_FLOOR
     init_radius: float = 1.0
+    init_radii: dict | None = None
     charge_values: tuple[float, float] | None = None
     charge_counts: tuple[int, int] | None = None
     # integration / time
@@ -68,6 +69,8 @@ def load_config_file(config_path: Path) -> SimulationConfig:
         data["batch_every"] = data["batch-every"]
     if "target_batch_mb" not in data and "target-batch-mb" in data:
         data["target_batch_mb"] = data["target-batch-mb"]
+    if "init_radii" not in data and "init-radii" in data:
+        data["init_radii"] = data["init-radii"]
     if "max_wall_time" not in data and "max-wall-time" in data:
         data["max_wall_time"] = data["max-wall-time"]
     if "charge_values" not in data and "charge-values" in data:
@@ -101,6 +104,7 @@ def load_config_file(config_path: Path) -> SimulationConfig:
         "resume-force",
         "batch-every",
         "target-batch-mb",
+        "init-radii",
         "max-wall-time",
         "charge-values",
         "charge-counts",
@@ -126,6 +130,10 @@ def load_config_file(config_path: Path) -> SimulationConfig:
         data["charge_values"] = tuple(float(v) for v in data["charge_values"])
     if "charge_counts" in data and data["charge_counts"] is not None:
         data["charge_counts"] = tuple(data["charge_counts"])
+    if "init_radii" in data and data["init_radii"] is not None:
+        init_radii = data["init_radii"]
+        if isinstance(init_radii, dict):
+            data["init_radii"] = {str(k): float(v) for k, v in init_radii.items()}
 
     allowed_keys = set(SimulationConfig.__dataclass_fields__.keys())
     filtered = {k: v for k, v in data.items() if k in allowed_keys}
@@ -146,6 +154,25 @@ def validate_config(config: SimulationConfig) -> None:
     # k=0 is supported (log potential), but keep other checks intact
     if config.init_radius <= 0.0:
         errors.append("init_radius must be > 0")
+    if config.init_radii is not None:
+        if not isinstance(config.init_radii, dict):
+            errors.append("init_radii must be a JSON object / dict")
+        else:
+            keys = set(config.init_radii.keys())
+            if keys != {"low", "high"}:
+                errors.append("init_radii must contain exactly 'low' and 'high'")
+            else:
+                for key in ("low", "high"):
+                    try:
+                        radius = float(config.init_radii[key])
+                    except (TypeError, ValueError):
+                        errors.append(f"init_radii['{key}'] must be a number")
+                        break
+                    if not np.isfinite(radius) or radius <= 0.0:
+                        errors.append(f"init_radii['{key}'] must be finite and > 0")
+                        break
+        if config.charge_values is None or config.charge_counts is None:
+            errors.append("init_radii requires charge_values and charge_counts")
     if config.method not in ("rk23", "dop853"):
         errors.append("method must be one of: rk23, dop853")
     if config.t_duration <= 0.0:

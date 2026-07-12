@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from ..config import SimulationConfig
-from ..init_conditions import init_charges_two_populations
+from ..init_conditions import init_charges_two_populations, init_positions_jittered_disk
 
 
 def auto_chunk_steps(steps: int, *, target_updates: int = 100, min_chunk: int = 100, max_chunk: int = 5000) -> int:
@@ -46,6 +46,8 @@ def config_fingerprint(config: SimulationConfig) -> str:
         payload["charge_values"] = config.charge_values
     if config.charge_counts is not None:
         payload["charge_counts"] = config.charge_counts
+    if config.init_radii is not None:
+        payload["init_radii"] = config.init_radii
     encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -58,6 +60,49 @@ def init_charges(n_particles, charge_values, charge_counts, rng):
     values = (float(charge_values[0]), float(charge_values[1]))
     counts = (int(charge_counts[0]), int(charge_counts[1]))
     return init_charges_two_populations(n_particles, values, counts, rng=rng)
+
+
+def init_positions_by_charge_radii(charges, init_radii, rng):
+    charges = np.asarray(charges, dtype=np.float64)
+    unique = np.unique(charges)
+    if unique.size != 2:
+        raise ValueError(
+            f"Expected exactly two charge populations for init_radii, found {unique.size}: "
+            f"{unique.tolist()}"
+        )
+
+    low_charge = float(unique[0])
+    high_charge = float(unique[1])
+    low_mask = np.isclose(charges, low_charge)
+    high_mask = np.isclose(charges, high_charge)
+
+    positions = np.empty((charges.size, 2), dtype=np.float64)
+    positions[low_mask] = init_positions_jittered_disk(
+        int(np.count_nonzero(low_mask)),
+        radius=float(init_radii["low"]),
+        rng=rng,
+    )
+    positions[high_mask] = init_positions_jittered_disk(
+        int(np.count_nonzero(high_mask)),
+        radius=float(init_radii["high"]),
+        rng=rng,
+    )
+    return positions
+
+
+def init_fresh_positions_and_charges(config: SimulationConfig, rng):
+    if config.init_radii is None:
+        positions = init_positions_jittered_disk(
+            config.n_particles,
+            radius=config.init_radius,
+            rng=rng,
+        )
+        charges = init_charges(config.n_particles, config.charge_values, config.charge_counts, rng)
+        return positions, charges
+
+    charges = init_charges(config.n_particles, config.charge_values, config.charge_counts, rng)
+    positions = init_positions_by_charge_radii(charges, config.init_radii, rng)
+    return positions, charges
 
 
 def is_streaming_mode(config: SimulationConfig) -> bool:
@@ -96,6 +141,7 @@ def build_stream_meta(
         seed=config.seed,
         r_floor=config.r_floor,
         init_radius=config.init_radius,
+        init_radii=config.init_radii,
         charge_values=config.charge_values,
         charge_counts=config.charge_counts,
         t0=config.t0,
@@ -143,6 +189,7 @@ def build_nonstream_meta(
         seed=config.seed,
         r_floor=config.r_floor,
         init_radius=config.init_radius,
+        init_radii=config.init_radii,
         charge_values=config.charge_values,
         charge_counts=config.charge_counts,
         t0=config.t0,

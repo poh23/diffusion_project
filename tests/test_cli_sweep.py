@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_PATH))
 
-from diffusion_sim.cli import _build_sweep_configs, _parse_sweep_specs
+from diffusion_sim.cli import _build_sweep_configs, _config_from_args, _parse_sweep_specs
 from diffusion_sim.config import SimulationConfig
 
 
@@ -17,6 +17,48 @@ def _args_with_sweep(sweep):
         out=None,
         resume_from=None,
     )
+
+
+def _args_with_config_overrides(**overrides):
+    values = dict(
+        config=None,
+        out=None,
+        out_format=None,
+        n_particles=None,
+        k=None,
+        v0=None,
+        l=None,
+        r_floor=None,
+        init_radius=None,
+        init_radius_low=None,
+        init_radius_high=None,
+        charge_values=None,
+        charge_counts=None,
+        t0=None,
+        t_duration=None,
+        save_every=None,
+        save_every_steps=None,
+        method=None,
+        seed=None,
+        rtol=None,
+        atol=None,
+        first_step=None,
+        max_step_global=None,
+        eta=None,
+        recompute_every=None,
+        interpolate_sampling=None,
+        diffusion=None,
+        diffusion_coeff=None,
+        diffusion_seed=None,
+        diffusion_noise_var=None,
+        batch_every=None,
+        target_batch_mb=None,
+        max_wall_time=None,
+        resume_from=None,
+        resume_force=None,
+    )
+    values.update(overrides)
+    return Namespace(**values)
 
 
 class TestCliSweep(unittest.TestCase):
@@ -54,6 +96,15 @@ class TestCliSweep(unittest.TestCase):
         )
         self.assertEqual(specs[0][0], "charge_counts")
         self.assertEqual(specs[0][1], [(50, 650), (100, 600)])
+
+    def test_config_from_args_sets_init_radii_from_cli(self):
+        config = _config_from_args(
+            _args_with_config_overrides(
+                init_radius_low=0.25,
+                init_radius_high=1.5,
+            )
+        )
+        self.assertEqual(config.init_radii, {"low": 0.25, "high": 1.5})
 
 
 if __name__ == "__main__":

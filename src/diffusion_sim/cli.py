@@ -29,6 +29,16 @@ def _parse_args():
     parser.add_argument("--r-floor", type=float, help="Hard distance floor for interactions.")
     parser.add_argument("--init-radius", type=float, help="Initial disk radius for particle placement.")
     parser.add_argument(
+        "--init-radius-low",
+        type=float,
+        help="Initial disk radius for the lower-charge population.",
+    )
+    parser.add_argument(
+        "--init-radius-high",
+        type=float,
+        help="Initial disk radius for the higher-charge population.",
+    )
+    parser.add_argument(
         "--charge-values",
         nargs=2,
         type=float,
@@ -106,6 +116,14 @@ def _config_from_args(args) -> SimulationConfig:
     if args.config:
         config = load_config_file(args.config)
 
+    init_radii = config.init_radii
+    if args.init_radius_low is not None or args.init_radius_high is not None:
+        init_radii = dict(init_radii or {})
+        if args.init_radius_low is not None:
+            init_radii["low"] = args.init_radius_low
+        if args.init_radius_high is not None:
+            init_radii["high"] = args.init_radius_high
+
     overrides = {
         "n_particles": args.n_particles,
         "k": args.k,
@@ -113,6 +131,7 @@ def _config_from_args(args) -> SimulationConfig:
         "l": args.l,
         "r_floor": args.r_floor,
         "init_radius": args.init_radius,
+        "init_radii": init_radii if init_radii != config.init_radii else None,
         "charge_values": args.charge_values,
         "charge_counts": args.charge_counts,
         "t0": args.t0,

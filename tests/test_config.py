@@ -1,12 +1,14 @@
 import sys
 import unittest
 from pathlib import Path
+import json
+import tempfile
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_PATH))
 
-from diffusion_sim.config import SimulationConfig, validate_config
+from diffusion_sim.config import SimulationConfig, load_config_file, validate_config
 
 
 class TestConfigValidation(unittest.TestCase):
@@ -34,6 +36,40 @@ class TestConfigValidation(unittest.TestCase):
         config = SimulationConfig(method="dop853", save_every=0.1, save_every_steps=10)
         with self.assertRaises(ValueError):
             validate_config(config)
+
+    def test_init_radii_requires_low_and_high(self):
+        config = SimulationConfig(
+            n_particles=2,
+            charge_values=(1.0, 2.0),
+            charge_counts=(1, 1),
+            init_radii={"low": 0.5},
+        )
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
+    def test_init_radii_requires_charge_populations(self):
+        config = SimulationConfig(init_radii={"low": 0.5, "high": 1.0})
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
+    def test_init_radii_loads_from_json(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "n_particles": 2,
+                        "charge_values": [1.0, 2.0],
+                        "charge_counts": [1, 1],
+                        "init_radii": {"low": 0.5, "high": 1.0},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = load_config_file(path)
+
+        self.assertEqual(config.init_radii, {"low": 0.5, "high": 1.0})
+        validate_config(config)
 
 
 if __name__ == "__main__":
