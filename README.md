@@ -18,6 +18,7 @@ Features
 - Adaptive solvers: `rk23` and `dop853`.
 - Output to NPZ or HDF5, with HDF5 batching and resume support.
 - Post-processing CLIs for density and energy diagnostics.
+- Output reduction CLI for downsampling saved trajectories by stride and time range.
 
 Installation
 ------------
@@ -301,6 +302,32 @@ Energy:
 uv run diffusion-energy data/20260120/your_run.h5
 ```
 
+Reduce saved trajectory size:
+
+```bash
+uv run diffusion-reduce data/20260120/your_run.h5 --stride 10
+uv run diffusion-reduce data/20260120/your_run.h5 --time-range 1.0 5.0 --stride 20
+```
+
+`diffusion-reduce` writes a new file by default, for example
+`your_run_reduced.h5`. Use `--overwrite` only when you want to replace the
+input file. The reducer keeps existing saved frames only; it does not
+interpolate missing times. It reduces frame-aligned arrays such as `positions`,
+`times`, `energy`, `std`, optional energy components, `density`, and `radii`,
+while preserving `charges` and updating `final_positions` to the last retained
+frame.
+
+Useful options:
+
+- `--stride N`: keep every Nth selected saved frame.
+- `--time-range START END`: first keep frames with `START <= time <= END`.
+- `--suffix TEXT`: change the output suffix from `_reduced`.
+- `--no-progress`: disable progress bars.
+- `--directory`: treat inputs as directories and reduce all supported files in them.
+
+For large HDF5 files, the command shows progress bars and copies selected
+frames in chunks to avoid loading the full trajectory into memory.
+
 External Potential
 ------------------
 
@@ -352,6 +379,7 @@ Project Structure
 |       |-- forces.py
 |       |-- init_conditions.py
 |       |-- metrics.py
+|       |-- reduce_cli.py
 |       |-- integrators/
 |       |   |-- __init__.py
 |       |   |-- dop853.py
@@ -391,6 +419,7 @@ Project Structure
 |   |-- test_integrators.py
 |   |-- test_io.py
 |   |-- test_plotting_radial_wasserstein.py
+|   |-- test_reduce_cli.py
 |   `-- test_rk23.py
 |-- scripts/
 |   |-- __init__.py
