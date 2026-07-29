@@ -19,10 +19,11 @@ from .radial_comparison import (
     plot_high_inner_radius_vs_charge_product,
     plot_inner_radius_ratio_power_vs_charge_value_ratio,
     plot_low_inner_radius_vs_charge_product,
+    plot_low_inner_radius_vs_low_population,
     plot_radial_force_balance,
     plot_special_radius_ratio_vs_charge_population_ratio,
 )
-from .std_diagnostics import plot_msd_by_charge, plot_std
+from .std_diagnostics import compute_std_by_charge, plot_msd_by_charge, plot_std, plot_std_by_charge
 from .wasserstein_radial_separation_plots import (
     compute_signed_radial_wasserstein,
     plot_scaled_signed_radial_wasserstein_vs_ratio_by_k,
@@ -33,6 +34,7 @@ from .wasserstein_radial_separation_plots import (
 __all__ = [
     "animate_mp4",
     "compute_mixing_metric",
+    "compute_std_by_charge",
     "compute_signed_mean_radius_difference",
     "compute_signed_radial_wasserstein",
     "embed_mp4",
@@ -43,6 +45,7 @@ __all__ = [
     "plot_inner_particles_selfsimilar_radius",
     "plot_inner_radius_ratio_power_vs_charge_value_ratio",
     "plot_low_inner_radius_vs_charge_product",
+    "plot_low_inner_radius_vs_low_population",
     "plot_mixing_metric",
     "plot_msd_by_charge",
     "plot_radial_force_balance",
@@ -56,5 +59,6 @@ __all__ = [
     "plot_signed_radial_wasserstein_vs_ratio",
     "plot_special_radius_ratio_vs_charge_population_ratio",
     "plot_std",
+    "plot_std_by_charge",
     "save_mp4",
 ]

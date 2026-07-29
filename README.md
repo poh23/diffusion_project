@@ -161,6 +161,68 @@ uv run diffusion-sim --config config_rk23_two_species.json
 uv run python -m diffusion_sim.cli --config config_rk23_two_species.json
 ```
 
+Parameter Sweeps
+----------------
+
+Use `--sweep PARAM=V1,V2,...` to run a sequence of simulations while changing
+one or two configuration parameters. Sweeps use the normal config/CLI merge
+order first, then apply each swept value on top of that base configuration.
+
+For sweep runs, do not pass `--out`; the CLI uses auto-generated output paths
+so each run gets its own file. Use `--out-format h5` if you want HDF5 output.
+
+Sweep over diffusion constants:
+
+```bash
+uv run diffusion-sim --config config_rk23.json --out-format h5 --diffusion --sweep diffusion-coeff=0.0,0.01,0.05,0.1
+```
+
+Sweep over two charge-value pairs. Tuple/list-valued parameters are written as
+one bracketed value per run:
+
+```bash
+uv run diffusion-sim --config config_rk23_two_species.json --out-format h5 --sweep charge-values="[1.0,1.0],[1.0,5.0],[1.0,20.0]"
+```
+
+Sweep over population sizes. Each `charge-counts` value must have two counts,
+and each pair must sum to `n_particles`:
+
+```bash
+uv run diffusion-sim --config config_rk23_two_species.json --out-format h5 --n-particles 1000 --sweep charge-counts="[900,100],[800,200],[500,500]"
+```
+
+You can sweep two parameters at once. Two-parameter sweeps are zipped by index,
+not expanded as a full grid:
+
+```bash
+uv run diffusion-sim --config config_rk23_two_species.json --out-format h5 --diffusion --sweep k=0,1,2 --sweep diffusion-coeff=0.01,0.05,0.1
+```
+
+This runs:
+
+```text
+k=0 with diffusion_coeff=0.01
+k=1 with diffusion_coeff=0.05
+k=2 with diffusion_coeff=0.1
+```
+
+A zipped sweep can also pair charge values with population sizes:
+
+```bash
+uv run diffusion-sim --config config_rk23_two_species.json --out-format h5 --n-particles 1000 --sweep charge-values="[1.0,2.0],[1.0,5.0],[1.0,20.0]" --sweep charge-counts="[900,100],[800,200],[500,500]"
+```
+
+Sweep limitations:
+
+- At most two `--sweep` flags are supported.
+- Two swept parameters must have the same number of values.
+- `--out` cannot be used with `--sweep`.
+- `--resume-from` cannot be used with `--sweep`.
+- `resume_from`, `resume_force`, `batch_every`, `target_batch_mb`, and
+  `max_wall_time` cannot be swept.
+- Parameter names may use dashes or underscores, for example
+  `diffusion-coeff` or `diffusion_coeff`.
+
 Core Arguments
 --------------
 
@@ -181,6 +243,7 @@ Core Arguments
 - `--seed`: RNG seed for initialization.
 - `--charge-values`: Two positive charge values for two-population runs.
 - `--charge-counts`: Two population sizes for two-population runs.
+- `--sweep`: Sequential zipped parameter sweep, repeatable up to two times.
 
 Adaptive and Diffusion Options
 ------------------------------

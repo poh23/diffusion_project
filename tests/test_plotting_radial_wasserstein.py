@@ -22,10 +22,52 @@ from diffusion_sim.plotting import (
     plot_signed_mean_radius_difference_vs_charge_value_ratio,
     plot_signed_mean_radius_difference_vs_ratio,
     plot_signed_radial_wasserstein_vs_ratio,
+    plot_low_inner_radius_vs_low_population,
 )
 
 
 class TestPlottingRadialWasserstein(unittest.TestCase):
+    def test_plot_low_inner_radius_vs_low_population_uses_low_charge_count(self):
+        sim_a = {
+            "times": np.array([0.0], dtype=np.float64),
+            "radii": np.array([[1.0, 2.0, 10.0, 11.0]], dtype=np.float64),
+            "density": np.ones((1, 4), dtype=np.float64),
+            "charges": np.array([1.0, 1.0, 5.0, 5.0], dtype=np.float64),
+            "positions": np.array([[[1.0, 0.0], [2.0, 0.0], [10.0, 0.0], [11.0, 0.0]]], dtype=np.float64),
+            "energy": np.array([0.0], dtype=np.float64),
+            "std": np.array([0.0], dtype=np.float64),
+            "final_positions": np.zeros((4, 2), dtype=np.float64),
+            "meta": {},
+        }
+        sim_b = {
+            "times": np.array([0.0], dtype=np.float64),
+            "radii": np.array([[3.0, 4.0, 5.0, 10.0]], dtype=np.float64),
+            "density": np.ones((1, 4), dtype=np.float64),
+            "charges": np.array([1.0, 1.0, 1.0, 5.0], dtype=np.float64),
+            "positions": np.array([[[3.0, 0.0], [4.0, 0.0], [5.0, 0.0], [10.0, 0.0]]], dtype=np.float64),
+            "energy": np.array([0.0], dtype=np.float64),
+            "std": np.array([0.0], dtype=np.float64),
+            "final_positions": np.zeros((4, 2), dtype=np.float64),
+            "meta": {},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            save_npz(tmp_path / "a.npz", sim_a)
+            save_npz(tmp_path / "b.npz", sim_b)
+
+            _, ax, n_low, r1, _, _ = plot_low_inner_radius_vs_low_population(
+                tmp_path,
+                time=0.0,
+                low_percentile=100.0,
+                fit_origin=True,
+                show=False,
+            )
+
+        self.assertTrue(np.allclose(n_low, [2.0, 3.0]))
+        self.assertTrue(np.allclose(r1, [2.0, 5.0]))
+        self.assertTrue(any("Fit:" in line.get_label() for line in ax.lines))
+
     def test_signed_mean_radius_difference_is_positive_when_higher_charge_is_farther_out(self):
         sim = {
             "times": np.array([0.0], dtype=np.float64),

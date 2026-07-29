@@ -2,6 +2,94 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+def _nanstd_rows(values):
+    finite = np.isfinite(values)
+    counts = np.sum(finite, axis=1)
+    out = np.full(values.shape[0], np.nan, dtype=np.float64)
+    valid = counts > 0
+    if not np.any(valid):
+        return out
+
+    sums = np.sum(np.where(finite, values, 0.0), axis=1)
+    means = np.zeros(values.shape[0], dtype=np.float64)
+    means[valid] = sums[valid] / counts[valid]
+    centered = np.where(finite, values - means[:, None], 0.0)
+    variances = np.zeros(values.shape[0], dtype=np.float64)
+    variances[valid] = np.sum(centered[valid] * centered[valid], axis=1) / counts[valid]
+    out[valid] = np.sqrt(np.maximum(variances[valid], 0.0))
+    return out
+
+
+def compute_std_by_charge(sim, k=None, self_similar=False):
+    if "charges" not in sim or sim["charges"] is None:
+        raise KeyError("Simulation dict must contain 'charges' for charge-wise std.")
+
+    times = np.asarray(sim["times"], dtype=np.float64)
+    charges = np.asarray(sim["charges"], dtype=np.float64)
+    if sim.get("radii") is not None:
+        radii = np.asarray(sim["radii"], dtype=np.float64)
+    else:
+        positions = np.asarray(sim["positions"], dtype=np.float64)
+        if positions.ndim != 3 or positions.shape[2] != 2:
+            raise ValueError(f"Expected positions shape (steps, n_particles, 2), got {positions.shape}.")
+        radii = np.linalg.norm(positions, axis=2)
+
+    if radii.ndim != 2:
+        raise ValueError(f"Expected radii with shape (steps, n_particles), got {radii.shape}.")
+    if times.ndim != 1 or times.shape[0] != radii.shape[0]:
+        raise ValueError("sim['times'] must be 1D with length equal to radii steps.")
+    if charges.shape != (radii.shape[1],):
+        raise ValueError("sim['charges'] must have length equal to n_particles.")
+
+    radii_for_std = radii.copy() if self_similar else radii
+    if self_similar:
+        meta = sim.get("meta", {}) or {}
+        k_val = k if k is not None else meta.get("k", None)
+        if k_val is None:
+            raise ValueError("k is required when self_similar=True (pass k=... or include it in sim['meta']).")
+        k_val = float(k_val)
+        if np.isclose(k_val, -2.0):
+            raise ValueError("k=-2 is invalid for self-similar scaling.")
+        gamma = 1.0 / (k_val + 2.0)
+        scale = np.full(times.shape, np.nan, dtype=np.float64)
+        positive = times > 0.0
+        scale[positive] = times[positive] ** gamma
+        radii_for_std = radii_for_std / scale[:, None]
+
+    std_by_charge = {}
+    for q in np.unique(charges):
+        mask = np.isclose(charges, q)
+        pop_radii = radii_for_std[:, mask]
+        std_by_charge[float(q)] = _nanstd_rows(pop_radii)
+
+    return times, std_by_charge
+
+
+def plot_std_by_charge(sim, k=None, self_similar=False, ax=None, show=True):
+    times, std_by_charge = compute_std_by_charge(sim, k=k, self_similar=self_similar)
+    created_fig = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        created_fig = True
+    else:
+        fig = ax.figure
+
+    for q, std in std_by_charge.items():
+        ax.plot(times, std, linewidth=2, label=f"q={q:g}")
+
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Std(r / t^(1/(k+2)))" if self_similar else "Std(r)")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    elif created_fig:
+        plt.close(fig)
+    return fig, ax, times, std_by_charge
+
+
 def plot_std(sim, show_theory=True, k=None, v0=None, l=None):
     meta = sim.get("meta", {}) or {}
     k = k if k is not None else meta.get("k", None)
@@ -154,4 +242,4 @@ def plot_msd_by_charge(sim, particle_indices_by_charge=None, origin_window=None,
     return fig, axes
 
 
-__all__ = ["plot_msd_by_charge", "plot_std"]
+__all__ = ["compute_std_by_charge", "plot_msd_by_charge", "plot_std", "plot_std_by_charge"]
