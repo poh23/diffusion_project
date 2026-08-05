@@ -1,0 +1,41 @@
+{
+  "atol": 0.001,
+  "batch_every": 0.5,
+  "charge_counts": [
+    1200,
+    300
+  ],
+  "charge_values": [
+    1.0,
+    10.0
+  ],
+  "diffusion": false,
+  "diffusion_coeff": 1.0,
+  "diffusion_noise_var": 1.0,
+  "diffusion_seed": 1,
+  "eta": 100.0,
+  "external_potential": "harmonic",
+  "external_potential_params": {
+    "center": [
+      0.0,
+      0.0
+    ],
+    "omega": 0.0
+  },
+  "init_radius": 1.0,
+  "interpolate_sampling": false,
+  "k": 3.0,
+  "l": 1.0,
+  "method": "rk23",
+  "n_particles": 1500,
+  "out_format": "h5",
+  "r_floor": 1e-07,
+  "recompute_every": 100,
+  "rtol": 0.001,
+  "save_every": 0.01,
+  "seed": 1,
+  "t0": 0.0,
+  "t_duration": 1000000,
+  "target_batch_mb": 64,
+  "v0": 1.0
+}
