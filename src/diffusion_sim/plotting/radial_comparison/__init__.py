@@ -488,22 +488,25 @@ def plot_low_inner_radius_vs_low_population(
                 )
             q_low = float(unique[0])
             n_low = int(np.count_nonzero(np.isclose(charges, q_low)))
+            n_high = int(np.count_nonzero(np.isclose(charges, unique[1])))
             if n_low <= 0:
                 raise ValueError("Low-charge population is empty.")
+            if n_high <= 0:
+                raise ValueError("High-charge population is empty.")
             t_used, r1, _ = _compute_low_and_high_inner_radii(
                 sim,
                 time=time,
                 low_percentile=low_percentile,
                 high_inner_percentile=high_inner_percentile,
             )
-            x_value = float(n_low)
+            x_value = float(n_high)
             y_value = float(r1)
         except ValueError as exc:
             print(f"Warning: {path}: {exc}; skipping.")
             continue
 
         if not np.isfinite(x_value) or not np.isfinite(y_value):
-            print(f"Warning: non-finite N_low or r1 for {path}; skipping.")
+            print(f"Warning: non-finite N_high or r1 for {path}; skipping.")
             continue
 
         x_values.append(x_value)
@@ -512,7 +515,7 @@ def plot_low_inner_radius_vs_low_population(
         labels.append(path.name)
 
     if not x_values:
-        raise ValueError("No valid files produced a finite N_low and r1 pair.")
+        raise ValueError("No valid files produced a finite N_high and r1 pair.")
 
     order = np.argsort(x_values)
     x_arr = np.asarray(x_values, dtype=np.float64)[order]
@@ -544,10 +547,10 @@ def plot_low_inner_radius_vs_low_population(
                 linewidth=1.8,
                 label=rf"Fit: $y = {slope:.3g}x$",
             )
-    ax.set_xlabel(r"Low-Charge Population Size $N_{\mathrm{low}}$")
+    ax.set_xlabel(r"High-Charge Population Size $N_{\mathrm{high}}$")
     ax.set_ylabel(r"$r_1$")
     ax.set_title(
-        "Inner Low-Charge Radius vs Low-Charge Population Size\n"
+        "Inner High-Charge Radius vs High-Charge Population Size\n"
         f"(target t={float(time):.3g}, low p={low_percentile:g}, high-inner p={high_inner_percentile:g})"
     )
     ax.grid(True, alpha=0.3)
@@ -560,6 +563,144 @@ def plot_low_inner_radius_vs_low_population(
     elif created_fig:
         plt.close(fig)
     return fig, ax, x_arr, y_arr, t_arr, labels_arr
+
+
+def _compute_low_radius_population_point(sim, *, time, low_percentile=95.0, scaled=True):
+    positions = np.asarray(sim["positions"], dtype=np.float64)
+    times = np.asarray(sim["times"], dtype=np.float64)
+    if positions.shape[0] == 0 or times.size == 0:
+        raise ValueError("Simulation output has no saved frames.")
+
+    idx = int(np.abs(times - time).argmin())
+    t_used = float(times[idx])
+    if scaled and t_used <= 0.0:
+        raise ValueError("Cannot scale radius by sqrt(t) when nearest saved time is <= 0.")
+
+    pos = positions[idx]
+    radii = np.linalg.norm(pos, axis=1)
+    charges = sim.get("charges")
+    if charges is None:
+        n1 = int(radii.size)
+        n2 = 0
+        r_low = radii
+    else:
+        charges = np.asarray(charges, dtype=np.float64)
+        if charges.shape[0] != radii.shape[0]:
+            raise ValueError("charges length does not match particle count.")
+        unique = np.unique(charges)
+        if unique.size == 1:
+            n1 = int(radii.size)
+            n2 = 0
+            r_low = radii
+        elif unique.size == 2:
+            q_low = float(unique[0])
+            q_high = float(unique[1])
+            low_mask = np.isclose(charges, q_low)
+            high_mask = np.isclose(charges, q_high)
+            n1 = int(np.count_nonzero(low_mask))
+            n2 = int(np.count_nonzero(high_mask))
+            if n1 <= 0:
+                raise ValueError("Low-charge population is empty.")
+            r_low = radii[low_mask]
+        else:
+            raise ValueError(
+                f"Expected one or two charge populations, found {unique.size}: {unique.tolist()}"
+            )
+
+    if r_low.size == 0:
+        raise ValueError("Low/single population is empty.")
+    r1 = float(np.percentile(r_low, low_percentile))
+    if scaled:
+        r1 /= float(np.sqrt(t_used))
+    return n1, n2, r1, t_used
+
+
+def plot_low_radius_vs_high_population_by_low_population(
+    directory,
+    time,
+    low_percentile=95.0,
+    scaled=True,
+    ax=None,
+    show=True,
+):
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise ValueError(f"Expected a directory path, got: {directory}")
+    paths = sorted(
+        path for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in {".npz", ".h5", ".hdf5"}
+    )
+    if not paths:
+        raise ValueError(f"No supported simulation files found in directory: {directory}")
+
+    grouped = {}
+    print(f"[plot] computing R1 vs N2 grouped by N1 for {len(paths)} file(s)")
+    for index, path in enumerate(paths, start=1):
+        print(f"[plot] processing file {index}/{len(paths)}: {path}")
+        sim = _load_sim_auto(path)
+        try:
+            n1, n2, r1, t_used = _compute_low_radius_population_point(
+                sim,
+                time=time,
+                low_percentile=low_percentile,
+                scaled=scaled,
+            )
+        except ValueError as exc:
+            print(f"Warning: {path}: {exc}; skipping.")
+            continue
+
+        if not np.isfinite(r1):
+            print(f"Warning: non-finite R1 for {path}; skipping.")
+            continue
+
+        grouped.setdefault(
+            n1,
+            {"n2": [], "r1": [], "actual_times": [], "labels": []},
+        )
+        grouped[n1]["n2"].append(float(n2))
+        grouped[n1]["r1"].append(float(r1))
+        grouped[n1]["actual_times"].append(float(t_used))
+        grouped[n1]["labels"].append(path.name)
+
+    if not grouped:
+        raise ValueError("No valid files produced a finite N1, N2, and R1 tuple.")
+
+    series = {}
+    for n1, values in grouped.items():
+        order = np.argsort(values["n2"])
+        series[int(n1)] = {
+            "n2": np.asarray(values["n2"], dtype=np.float64)[order],
+            "r1": np.asarray(values["r1"], dtype=np.float64)[order],
+            "actual_times": np.asarray(values["actual_times"], dtype=np.float64)[order],
+            "labels": np.asarray(values["labels"], dtype=object)[order],
+        }
+
+    created_fig = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        created_fig = True
+    else:
+        fig = ax.figure
+
+    for n1 in sorted(series):
+        values = series[n1]
+        ax.plot(values["n2"], values["r1"], marker="o", linewidth=2, label=f"N1={n1}")
+
+    ax.set_xlabel(r"High-Charge Population Size $N_2$")
+    ax.set_ylabel(r"$R_1 / \sqrt{t}$" if scaled else r"$R_1$")
+    ax.set_title(
+        "Low-Charge Radius vs High-Charge Population Size\n"
+        f"(target t={float(time):.3g}, low p={low_percentile:g})"
+    )
+    ax.grid(True, alpha=0.3)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    elif created_fig:
+        plt.close(fig)
+    return fig, ax, series
 
 
 def plot_radial_force_balance(sim, frame=None, last_n_frames=20, bins=60, use_rescaled_coords="auto", k=None, ax=None, show=True):
@@ -694,6 +835,7 @@ __all__ = [
     "plot_high_inner_radius_vs_charge_product",
     "plot_low_inner_radius_vs_charge_product",
     "plot_low_inner_radius_vs_low_population",
+    "plot_low_radius_vs_high_population_by_low_population",
     "plot_inner_radius_ratio_power_vs_charge_value_ratio",
     "plot_radial_force_balance",
     "plot_special_radius_ratio_vs_charge_population_ratio",

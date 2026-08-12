@@ -20,6 +20,7 @@ from .radial_comparison import (
     plot_inner_radius_ratio_power_vs_charge_value_ratio,
     plot_low_inner_radius_vs_charge_product,
     plot_low_inner_radius_vs_low_population,
+    plot_low_radius_vs_high_population_by_low_population,
     plot_radial_force_balance,
     plot_special_radius_ratio_vs_charge_population_ratio,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "plot_inner_radius_ratio_power_vs_charge_value_ratio",
     "plot_low_inner_radius_vs_charge_product",
     "plot_low_inner_radius_vs_low_population",
+    "plot_low_radius_vs_high_population_by_low_population",
     "plot_mixing_metric",
     "plot_msd_by_charge",
     "plot_radial_force_balance",
