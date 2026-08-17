@@ -1,5 +1,7 @@
+import json
 from pathlib import Path
 
+import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -57,6 +59,27 @@ def _radial_bin_stats(r: np.ndarray, f_rad: np.ndarray, edges: np.ndarray):
     return centers, means, sem, counts
 
 
+def _load_sim_nearest_frame_auto(path, time):
+    path = Path(path)
+    if path.suffix.lower() not in {".h5", ".hdf5"}:
+        return _load_sim_auto(path)
+
+    with h5py.File(path, "r") as h5:
+        times_all = h5["times"][()]
+        if times_all.size == 0:
+            raise ValueError(f"{path}: empty times dataset.")
+        idx = int(np.abs(times_all - time).argmin())
+        meta_json = h5.attrs.get("meta_json")
+        meta = json.loads(meta_json) if meta_json is not None else {}
+        return {
+            "positions": h5["positions"][idx:idx + 1],
+            "times": times_all[idx:idx + 1],
+            "charges": h5["charges"][()] if "charges" in h5 else None,
+            "meta": meta,
+            "source_path": str(path),
+        }
+
+
 def _crossings_with_reference(x: np.ndarray, y: np.ndarray, y_ref: np.ndarray) -> list[float]:
     valid = np.isfinite(x) & np.isfinite(y) & np.isfinite(y_ref)
     xv = x[valid]
@@ -89,7 +112,7 @@ def plot_inner_radius_ratio_power_vs_charge_value_ratio(directory, time, low_per
     print(f"[plot] computing ((r2/r1)^(k+2)) for {len(paths)} file(s)")
     for index, path in enumerate(paths, start=1):
         print(f"[plot] processing file {index}/{len(paths)}: {path}")
-        sim = _load_sim_auto(path)
+        sim = _load_sim_nearest_frame_auto(path, time)
         if "charges" not in sim:
             print(f"Warning: missing charges in {path}; skipping.")
             continue
@@ -476,7 +499,7 @@ def plot_low_inner_radius_vs_low_population(
     print(f"[plot] computing scaled r1 vs N_low for {len(paths)} file(s)")
     for index, path in enumerate(paths, start=1):
         print(f"[plot] processing file {index}/{len(paths)}: {path}")
-        sim = _load_sim_auto(path)
+        sim = _load_sim_nearest_frame_auto(path, time)
         if "charges" not in sim:
             print(f"Warning: missing charges in {path}; skipping.")
             continue
@@ -579,7 +602,7 @@ def plot_low_inner_radius_vs_low_population(
     return fig, ax, x_arr, y_arr, t_arr, labels_arr
 
 
-def _compute_low_radius_population_point(sim, *, time, low_percentile=95.0, scaled=True):
+def _compute_low_radius_population_point(sim, *, time, low_percentile=95.0, scaled=True, k=None):
     positions = np.asarray(sim["positions"], dtype=np.float64)
     times = np.asarray(sim["times"], dtype=np.float64)
     if positions.shape[0] == 0 or times.size == 0:
@@ -588,44 +611,51 @@ def _compute_low_radius_population_point(sim, *, time, low_percentile=95.0, scal
     idx = int(np.abs(times - time).argmin())
     t_used = float(times[idx])
     if scaled and t_used <= 0.0:
-        raise ValueError("Cannot scale radius by sqrt(t) when nearest saved time is <= 0.")
+        raise ValueError("Cannot scale radius when nearest saved time is <= 0.")
 
     pos = positions[idx]
     radii = np.linalg.norm(pos, axis=1)
     charges = sim.get("charges")
     if charges is None:
+        raise ValueError("Simulation dict must contain 'charges'.")
+    charges = np.asarray(charges, dtype=np.float64)
+    if charges.shape[0] != radii.shape[0]:
+        raise ValueError("charges length does not match particle count.")
+    unique = np.unique(charges)
+    if unique.size == 1:
+        q_low = float(unique[0])
+        q_high = q_low
         n1 = int(radii.size)
         n2 = 0
         r_low = radii
+    elif unique.size == 2:
+        q_low = float(unique[0])
+        q_high = float(unique[1])
+        low_mask = np.isclose(charges, q_low)
+        high_mask = np.isclose(charges, q_high)
+        n1 = int(np.count_nonzero(low_mask))
+        n2 = int(np.count_nonzero(high_mask))
+        if n1 <= 0:
+            raise ValueError("Low-charge population is empty.")
+        r_low = radii[low_mask]
     else:
-        charges = np.asarray(charges, dtype=np.float64)
-        if charges.shape[0] != radii.shape[0]:
-            raise ValueError("charges length does not match particle count.")
-        unique = np.unique(charges)
-        if unique.size == 1:
-            n1 = int(radii.size)
-            n2 = 0
-            r_low = radii
-        elif unique.size == 2:
-            q_low = float(unique[0])
-            q_high = float(unique[1])
-            low_mask = np.isclose(charges, q_low)
-            high_mask = np.isclose(charges, q_high)
-            n1 = int(np.count_nonzero(low_mask))
-            n2 = int(np.count_nonzero(high_mask))
-            if n1 <= 0:
-                raise ValueError("Low-charge population is empty.")
-            r_low = radii[low_mask]
-        else:
-            raise ValueError(
-                f"Expected one or two charge populations, found {unique.size}: {unique.tolist()}"
-            )
+        raise ValueError(
+            f"Expected one or two charge populations, found {unique.size}: {unique.tolist()}"
+        )
 
     if r_low.size == 0:
         raise ValueError("Low/single population is empty.")
     r1 = float(np.percentile(r_low, low_percentile))
     if scaled:
-        r1 /= float(np.sqrt(t_used))
+        k_value = float(k if k is not None else (sim.get("meta", {}) or {}).get("k"))
+        if not np.isfinite(k_value):
+            raise ValueError("k is missing or non-finite.")
+        if np.isclose(k_value, -2.0):
+            raise ValueError("k=-2 is invalid (division by zero in exponent).")
+        n_total = int(charges.size)
+        q_mean = (n1 / n_total) * q_low + (n2 / n_total) * q_high
+        scale = (n_total * (q_mean ** 2) * t_used) ** (1.0 / (k_value + 2.0))
+        r1 /= float(scale)
     return n1, n2, r1, t_used
 
 
@@ -634,6 +664,7 @@ def plot_low_radius_vs_high_population_by_low_population(
     time,
     low_percentile=95.0,
     scaled=True,
+    k=None,
     ax=None,
     show=True,
 ):
@@ -651,13 +682,14 @@ def plot_low_radius_vs_high_population_by_low_population(
     print(f"[plot] computing R1 vs N2 grouped by N1 for {len(paths)} file(s)")
     for index, path in enumerate(paths, start=1):
         print(f"[plot] processing file {index}/{len(paths)}: {path}")
-        sim = _load_sim_auto(path)
+        sim = _load_sim_nearest_frame_auto(path, time)
         try:
             n1, n2, r1, t_used = _compute_low_radius_population_point(
                 sim,
                 time=time,
                 low_percentile=low_percentile,
                 scaled=scaled,
+                k=k,
             )
         except ValueError as exc:
             print(f"Warning: {path}: {exc}; skipping.")
@@ -701,9 +733,12 @@ def plot_low_radius_vs_high_population_by_low_population(
         ax.plot(values["n2"], values["r1"], marker="o", linewidth=2, label=f"N1={n1}")
 
     ax.set_xlabel(r"High-Charge Population Size $N_2$")
-    ax.set_ylabel(r"$R_1 / \sqrt{t}$" if scaled else r"$R_1$")
+    ax.set_ylabel(
+        r"$R_1 / \left[N\left((N_1/N)q_1 + (N_2/N)q_2\right)^2 t\right]^{1/(k+2)}$"
+        if scaled else r"$R_1$"
+    )
     ax.set_title(
-        "Low-Charge Radius vs High-Charge Population Size\n"
+        ("Scaled " if scaled else "") + "Low-Charge Radius vs High-Charge Population Size\n"
         f"(target t={float(time):.3g}, low p={low_percentile:g})"
     )
     ax.grid(True, alpha=0.3)

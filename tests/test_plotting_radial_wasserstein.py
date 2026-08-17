@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_PATH))
 
+from diffusion_sim.io.h5 import save_h5
 from diffusion_sim.io.npz import save_npz
 from diffusion_sim.plotting import (
     compute_signed_mean_radius_difference,
@@ -36,7 +37,7 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
             "energy": np.array([0.0], dtype=np.float64),
             "std": np.array([0.0], dtype=np.float64),
             "final_positions": np.zeros((3, 2), dtype=np.float64),
-            "meta": {},
+            "meta": {"k": 3.0},
         }
         sim_b = {
             "times": np.array([4.0], dtype=np.float64),
@@ -45,7 +46,7 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
             "energy": np.array([0.0], dtype=np.float64),
             "std": np.array([0.0], dtype=np.float64),
             "final_positions": np.zeros((4, 2), dtype=np.float64),
-            "meta": {},
+            "meta": {"k": 3.0},
         }
         sim_c = {
             "times": np.array([4.0], dtype=np.float64),
@@ -54,7 +55,7 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
             "energy": np.array([0.0], dtype=np.float64),
             "std": np.array([0.0], dtype=np.float64),
             "final_positions": np.zeros((4, 2), dtype=np.float64),
-            "meta": {},
+            "meta": {"k": 3.0},
         }
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -73,10 +74,16 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
 
         self.assertEqual(sorted(series), [2, 3])
         self.assertTrue(np.allclose(series[2]["n2"], [1.0, 2.0]))
-        self.assertTrue(np.allclose(series[2]["r1"], [1.0, 1.5]))
+        expected_a = 2.0 / ((3.0 * ((2.0 / 3.0) * 1.0 + (1.0 / 3.0) * 5.0) ** 2 * 4.0) ** (1.0 / 5.0))
+        expected_b = 3.0 / ((4.0 * ((2.0 / 4.0) * 1.0 + (2.0 / 4.0) * 5.0) ** 2 * 4.0) ** (1.0 / 5.0))
+        expected_c = 6.0 / ((4.0 * ((3.0 / 4.0) * 1.0 + (1.0 / 4.0) * 5.0) ** 2 * 4.0) ** (1.0 / 5.0))
+        self.assertTrue(np.allclose(series[2]["r1"], [expected_a, expected_b]))
         self.assertTrue(np.allclose(series[3]["n2"], [1.0]))
-        self.assertTrue(np.allclose(series[3]["r1"], [3.0]))
-        self.assertEqual(ax.get_ylabel(), r"$R_1 / \sqrt{t}$")
+        self.assertTrue(np.allclose(series[3]["r1"], [expected_c]))
+        self.assertEqual(
+            ax.get_ylabel(),
+            r"$R_1 / \left[N\left((N_1/N)q_1 + (N_2/N)q_2\right)^2 t\right]^{1/(k+2)}$",
+        )
         self.assertEqual([line.get_label() for line in ax.lines], ["N1=2", "N1=3"])
 
     def test_plot_low_radius_vs_high_population_includes_one_population_as_zero_high(self):
@@ -87,7 +94,7 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
             "energy": np.array([0.0], dtype=np.float64),
             "std": np.array([0.0], dtype=np.float64),
             "final_positions": np.zeros((3, 2), dtype=np.float64),
-            "meta": {},
+            "meta": {"k": 3.0},
         }
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -104,7 +111,8 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
 
         self.assertEqual(list(series), [3])
         self.assertTrue(np.allclose(series[3]["n2"], [0.0]))
-        self.assertTrue(np.allclose(series[3]["r1"], [2.5]))
+        expected = 5.0 / ((3.0 * 1.0 ** 2 * 4.0) ** (1.0 / 5.0))
+        self.assertTrue(np.allclose(series[3]["r1"], [expected]))
 
     def test_plot_low_radius_vs_high_population_rejects_scaled_zero_time(self):
         sim = {
@@ -128,6 +136,38 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
                     scaled=True,
                     show=False,
                 )
+
+    def test_plot_low_radius_vs_high_population_reads_h5_nearest_frame_scaled(self):
+        sim = {
+            "times": np.array([1.0, 4.0], dtype=np.float64),
+            "positions": np.array(
+                [
+                    [[100.0, 0.0], [200.0, 0.0], [300.0, 0.0]],
+                    [[1.0, 0.0], [2.0, 0.0], [10.0, 0.0]],
+                ],
+                dtype=np.float64,
+            ),
+            "charges": np.array([1.0, 1.0, 5.0], dtype=np.float64),
+            "energy": np.array([0.0, 0.0], dtype=np.float64),
+            "std": np.array([0.0, 0.0], dtype=np.float64),
+            "final_positions": np.zeros((3, 2), dtype=np.float64),
+            "meta": {"k": 3.0},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            save_h5(tmp_path / "run.h5", sim)
+
+            _, _, series = plot_low_radius_vs_high_population_by_low_population(
+                tmp_path,
+                time=4.0,
+                low_percentile=100.0,
+                scaled=True,
+                show=False,
+            )
+
+        expected = 2.0 / ((3.0 * ((2.0 / 3.0) * 1.0 + (1.0 / 3.0) * 5.0) ** 2 * 4.0) ** (1.0 / 5.0))
+        self.assertTrue(np.allclose(series[2]["r1"], [expected]))
 
     def test_plot_low_inner_radius_vs_low_population_scales_r1(self):
         sim_a = {
