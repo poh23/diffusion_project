@@ -1,0 +1,29 @@
+{
+  "method": "dop853",
+  "n_particles": 1500,
+  "k": 3.0,
+  "v0": 1.0,
+  "l": 1.0,
+  "r_floor": 1e-7,
+  "init_radius": 0.5,
+  "init_radii": {
+    "low": 0.5,
+    "high": 0.5
+  },
+  "t0": 0.0,
+  "t_duration": 10000.0,
+  "save_every": 1,
+  "rtol": 1e-6,
+  "atol": 1e-6,
+  "charge_values": [1.0, 10.0],
+  "charge_counts": [1200, 300],
+  "diffusion": false,
+  "diffusion_coeff": 1.0,
+  "diffusion_noise_var": 1.0,
+  "diffusion_seed": 1,
+  "seed": 1,
+  "out_format": "h5",
+  "chunk_steps": 1000,
+  "batch_every": 10.0,
+  "target_batch_mb": 64
+}

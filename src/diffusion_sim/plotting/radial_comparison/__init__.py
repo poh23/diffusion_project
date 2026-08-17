@@ -458,6 +458,7 @@ def plot_low_inner_radius_vs_low_population(
     low_percentile=95.0,
     high_inner_percentile=5.0,
     fit_origin=False,
+    k=None,
     ax=None,
     show=True,
 ):
@@ -472,7 +473,7 @@ def plot_low_inner_radius_vs_low_population(
         raise ValueError(f"No supported simulation files found in directory: {directory}")
 
     x_values, y_values, actual_times, labels = [], [], [], []
-    print(f"[plot] computing r1 vs N_low for {len(paths)} file(s)")
+    print(f"[plot] computing scaled r1 vs N_low for {len(paths)} file(s)")
     for index, path in enumerate(paths, start=1):
         print(f"[plot] processing file {index}/{len(paths)}: {path}")
         sim = _load_sim_auto(path)
@@ -499,14 +500,25 @@ def plot_low_inner_radius_vs_low_population(
                 low_percentile=low_percentile,
                 high_inner_percentile=high_inner_percentile,
             )
+            k_value = float(k if k is not None else (sim.get("meta", {}) or {}).get("k"))
+            if not np.isfinite(k_value):
+                raise ValueError("k is missing or non-finite.")
+            if np.isclose(k_value, -2.0):
+                raise ValueError("k=-2 is invalid (division by zero in exponent).")
+            if t_used <= 0.0:
+                raise ValueError("Cannot scale r1 when nearest saved time is <= 0.")
+            n_total = int(charges.size)
+            q_high = float(unique[1])
+            q_mean = (n_low / n_total) * q_low + (n_high / n_total) * q_high
+            scale = (n_total * (q_mean ** 2) * t_used) ** (1.0 / (k_value + 2.0))
             x_value = float(n_high)
-            y_value = float(r1)
+            y_value = float(r1 / scale)
         except ValueError as exc:
             print(f"Warning: {path}: {exc}; skipping.")
             continue
 
         if not np.isfinite(x_value) or not np.isfinite(y_value):
-            print(f"Warning: non-finite N_high or r1 for {path}; skipping.")
+            print(f"Warning: non-finite N_high or scaled r1 for {path}; skipping.")
             continue
 
         x_values.append(x_value)
@@ -515,7 +527,7 @@ def plot_low_inner_radius_vs_low_population(
         labels.append(path.name)
 
     if not x_values:
-        raise ValueError("No valid files produced a finite N_high and r1 pair.")
+        raise ValueError("No valid files produced a finite N_high and scaled r1 pair.")
 
     order = np.argsort(x_values)
     x_arr = np.asarray(x_values, dtype=np.float64)[order]
@@ -548,9 +560,11 @@ def plot_low_inner_radius_vs_low_population(
                 label=rf"Fit: $y = {slope:.3g}x$",
             )
     ax.set_xlabel(r"High-Charge Population Size $N_{\mathrm{high}}$")
-    ax.set_ylabel(r"$r_1$")
+    ax.set_ylabel(
+        r"$r_1 / \left[N\left((N_1/N)q_1 + (N_2/N)q_2\right)^2 t\right]^{1/(k+2)}$"
+    )
     ax.set_title(
-        "Inner High-Charge Radius vs High-Charge Population Size\n"
+        "Scaled Inner High-Charge Radius vs High-Charge Population Size\n"
         f"(target t={float(time):.3g}, low p={low_percentile:g}, high-inner p={high_inner_percentile:g})"
     )
     ax.grid(True, alpha=0.3)

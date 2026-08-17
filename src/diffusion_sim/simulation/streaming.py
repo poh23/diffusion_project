@@ -16,6 +16,7 @@ from ..io.h5_batch import (
     write_h5_resume_state,
 )
 from .helpers import (
+    auto_chunk_steps,
     build_saved_result,
     build_stream_meta,
     compute_sample_count,
@@ -445,6 +446,9 @@ def _run_dop853_stream(
     steps_total = int(np.floor((state["t_end"] - state["t_start_sim"]) / dt)) + 1
     skip_first = state["resumed"] and steps_total > 0
     steps = max(0, steps_total - (1 if skip_first else 0))
+    chunk_steps = config.chunk_steps
+    if chunk_steps <= 0:
+        chunk_steps = auto_chunk_steps(steps, target_updates=80, min_chunk=100, max_chunk=10000)
     record_hook = _Dop853RecordHook(
         pbar=pbar,
         last_state=last_state,
@@ -465,7 +469,7 @@ def _run_dop853_stream(
         t0=state["t_start_sim"],
         rtol=config.rtol,
         atol=config.atol,
-        chunk_steps=config.chunk_steps,
+        chunk_steps=chunk_steps,
         record_hook=record_hook,
         return_arrays=False,
         skip_first=skip_first,
