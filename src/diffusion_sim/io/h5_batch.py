@@ -36,6 +36,67 @@ def _unpack_state(blob):
     return pickle.loads(bytes(blob))
 
 
+def _dataset_is_resizable(dataset) -> bool:
+    return dataset.chunks is not None and dataset.maxshape is not None and dataset.maxshape[0] is None
+
+
+def _make_dataset_resizable(h5, name, *, maxshape, chunks, dtype, copy_len=None):
+    old = h5[name]
+    if _dataset_is_resizable(old):
+        return
+
+    data_shape = old.shape
+    attrs = dict(old.attrs.items())
+    tmp_name = f"__tmp_resizable_{name}"
+    if tmp_name in h5:
+        del h5[tmp_name]
+
+    new = h5.create_dataset(
+        tmp_name,
+        shape=data_shape,
+        maxshape=maxshape,
+        chunks=chunks,
+        dtype=dtype,
+    )
+    for key, value in attrs.items():
+        new.attrs[key] = value
+
+    if copy_len is None:
+        copy_len = max(1, int(chunks[0]))
+    for start in range(0, data_shape[0], copy_len):
+        end = min(start + copy_len, data_shape[0])
+        new[start:end] = old[start:end]
+
+    del h5[name]
+    h5.move(tmp_name, name)
+
+
+def _ensure_resumable_frame_datasets(h5, n_particles, *, chunk_len):
+    specs = {
+        "positions": ((None, n_particles, 2), (chunk_len, n_particles, 2), np.float64),
+        "times": ((None,), (chunk_len,), np.float64),
+        "energy": ((None,), (chunk_len,), np.float64),
+        "energy_aa": ((None,), (chunk_len,), np.float64),
+        "energy_ab": ((None,), (chunk_len,), np.float64),
+        "energy_bb": ((None,), (chunk_len,), np.float64),
+        "std": ((None,), (chunk_len,), np.float64),
+    }
+    existing_len = h5["times"].shape[0] if "times" in h5 else 0
+    for name, (maxshape, chunks, dtype) in specs.items():
+        if name not in h5:
+            h5.create_dataset(
+                name,
+                shape=(existing_len, *maxshape[1:]),
+                maxshape=maxshape,
+                chunks=chunks,
+                dtype=dtype,
+            )
+            if existing_len > 0:
+                h5[name][...] = np.nan
+            continue
+        _make_dataset_resizable(h5, name, maxshape=maxshape, chunks=chunks, dtype=h5[name].dtype)
+
+
 def open_h5_batch(path, n_particles, *, resume=False, chunk_len=1024):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -101,18 +162,21 @@ def open_h5_batch(path, n_particles, *, resume=False, chunk_len=1024):
         )
     else:
         chunk_len = max(1, int(chunk_len))
-        existing_len = h5["times"].shape[0] if "times" in h5 else 0
-        for name in ("energy_aa", "energy_ab", "energy_bb"):
-            if name not in h5:
-                h5.create_dataset(
-                    name,
-                    shape=(existing_len,),
-                    maxshape=(None,),
-                    chunks=(chunk_len,),
-                    dtype=np.float64,
-                )
-                if existing_len > 0:
-                    h5[name][...] = np.nan
+        if resume:
+            _ensure_resumable_frame_datasets(h5, n_particles, chunk_len=chunk_len)
+        else:
+            existing_len = h5["times"].shape[0] if "times" in h5 else 0
+            for name in ("energy_aa", "energy_ab", "energy_bb"):
+                if name not in h5:
+                    h5.create_dataset(
+                        name,
+                        shape=(existing_len,),
+                        maxshape=(None,),
+                        chunks=(chunk_len,),
+                        dtype=np.float64,
+                    )
+                    if existing_len > 0:
+                        h5[name][...] = np.nan
 
     return h5
 

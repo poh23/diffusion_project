@@ -39,6 +39,26 @@ def _parse_args():
         help="Initial disk radius for the higher-charge population.",
     )
     parser.add_argument(
+        "--init-radius-low-min",
+        type=float,
+        help="Inner initial radius for the lower-charge population.",
+    )
+    parser.add_argument(
+        "--init-radius-low-max",
+        type=float,
+        help="Outer initial radius for the lower-charge population.",
+    )
+    parser.add_argument(
+        "--init-radius-high-min",
+        type=float,
+        help="Inner initial radius for the higher-charge population.",
+    )
+    parser.add_argument(
+        "--init-radius-high-max",
+        type=float,
+        help="Outer initial radius for the higher-charge population.",
+    )
+    parser.add_argument(
         "--charge-values",
         nargs=2,
         type=float,
@@ -111,18 +131,46 @@ def _parse_args():
     return parser.parse_args()
 
 
+def _apply_init_radius_range_override(args, init_radii: dict, population: str) -> None:
+    scalar_attr = f"init_radius_{population}"
+    min_attr = f"init_radius_{population}_min"
+    max_attr = f"init_radius_{population}_max"
+    scalar = getattr(args, scalar_attr)
+    inner = getattr(args, min_attr)
+    outer = getattr(args, max_attr)
+
+    if scalar is not None and (inner is not None or outer is not None):
+        raise ValueError(
+            f"--init-radius-{population} cannot be combined with "
+            f"--init-radius-{population}-min/--init-radius-{population}-max"
+        )
+    if (inner is None) ^ (outer is None):
+        raise ValueError(
+            f"--init-radius-{population}-min and --init-radius-{population}-max must be set together"
+        )
+    if scalar is not None:
+        init_radii[population] = scalar
+    elif inner is not None and outer is not None:
+        init_radii[population] = [inner, outer]
+
+
 def _config_from_args(args) -> SimulationConfig:
     config = SimulationConfig()
     if args.config:
         config = load_config_file(args.config)
 
     init_radii = config.init_radii
-    if args.init_radius_low is not None or args.init_radius_high is not None:
+    if (
+        args.init_radius_low is not None
+        or args.init_radius_high is not None
+        or args.init_radius_low_min is not None
+        or args.init_radius_low_max is not None
+        or args.init_radius_high_min is not None
+        or args.init_radius_high_max is not None
+    ):
         init_radii = dict(init_radii or {})
-        if args.init_radius_low is not None:
-            init_radii["low"] = args.init_radius_low
-        if args.init_radius_high is not None:
-            init_radii["high"] = args.init_radius_high
+        _apply_init_radius_range_override(args, init_radii, "low")
+        _apply_init_radius_range_override(args, init_radii, "high")
 
     overrides = {
         "n_particles": args.n_particles,

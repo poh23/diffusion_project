@@ -55,6 +55,12 @@ class SimulationConfig:
     external_potential_params: dict | None = None
 
 
+def _coerce_init_radius_value(value):
+    if isinstance(value, (list, tuple)):
+        return [float(v) for v in value]
+    return float(value)
+
+
 def load_config_file(config_path: Path) -> SimulationConfig:
     with config_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
@@ -133,7 +139,7 @@ def load_config_file(config_path: Path) -> SimulationConfig:
     if "init_radii" in data and data["init_radii"] is not None:
         init_radii = data["init_radii"]
         if isinstance(init_radii, dict):
-            data["init_radii"] = {str(k): float(v) for k, v in init_radii.items()}
+            data["init_radii"] = {str(k): _coerce_init_radius_value(v) for k, v in init_radii.items()}
 
     allowed_keys = set(SimulationConfig.__dataclass_fields__.keys())
     filtered = {k: v for k, v in data.items() if k in allowed_keys}
@@ -163,14 +169,35 @@ def validate_config(config: SimulationConfig) -> None:
                 errors.append("init_radii must contain exactly 'low' and 'high'")
             else:
                 for key in ("low", "high"):
-                    try:
-                        radius = float(config.init_radii[key])
-                    except (TypeError, ValueError):
-                        errors.append(f"init_radii['{key}'] must be a number")
-                        break
-                    if not np.isfinite(radius) or radius <= 0.0:
-                        errors.append(f"init_radii['{key}'] must be finite and > 0")
-                        break
+                    value = config.init_radii[key]
+                    if isinstance(value, (list, tuple)):
+                        if len(value) != 2:
+                            errors.append(f"init_radii['{key}'] range must have length 2")
+                            break
+                        try:
+                            inner = float(value[0])
+                            outer = float(value[1])
+                        except (TypeError, ValueError):
+                            errors.append(f"init_radii['{key}'] range values must be numbers")
+                            break
+                        if not np.isfinite(inner) or not np.isfinite(outer):
+                            errors.append(f"init_radii['{key}'] range values must be finite")
+                            break
+                        if inner < 0.0:
+                            errors.append(f"init_radii['{key}'] inner radius must be >= 0")
+                            break
+                        if outer <= inner:
+                            errors.append(f"init_radii['{key}'] outer radius must be > inner radius")
+                            break
+                    else:
+                        try:
+                            radius = float(value)
+                        except (TypeError, ValueError):
+                            errors.append(f"init_radii['{key}'] must be a number or length-2 range")
+                            break
+                        if not np.isfinite(radius) or radius <= 0.0:
+                            errors.append(f"init_radii['{key}'] must be finite and > 0")
+                            break
         if config.charge_values is None or config.charge_counts is None:
             errors.append("init_radii requires charge_values and charge_counts")
     if config.method not in ("rk23", "dop853"):

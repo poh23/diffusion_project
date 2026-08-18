@@ -21,6 +21,12 @@ FRAME_DATASETS = (
     "density",
     "radii",
 )
+COPY_BLOCK_SIZE = 256
+
+
+def _frame_chunks(shape: tuple[int, ...]) -> tuple[int, ...]:
+    chunk_len = min(COPY_BLOCK_SIZE, max(1, shape[0]))
+    return (chunk_len, *shape[1:])
 
 
 def _parse_args():
@@ -180,13 +186,25 @@ def reduce_sim_dict(
 
 def _copy_selected_dataset(src, dst, name: str, indices: np.ndarray, *, progress: bool):
     shape = (indices.size, *src[name].shape[1:])
-    out = dst.create_dataset(name, shape=shape, dtype=src[name].dtype)
-    iterator = range(0, indices.size, 256)
+    maxshape = (None, *src[name].shape[1:])
+    out = dst.create_dataset(
+        name,
+        shape=shape,
+        maxshape=maxshape,
+        chunks=_frame_chunks(shape),
+        dtype=src[name].dtype,
+    )
+    iterator = range(0, indices.size, COPY_BLOCK_SIZE)
     if progress:
-        iterator = tqdm(iterator, total=int(np.ceil(indices.size / 256)), desc=f"copy {name}", leave=False)
+        iterator = tqdm(
+            iterator,
+            total=int(np.ceil(indices.size / COPY_BLOCK_SIZE)),
+            desc=f"copy {name}",
+            leave=False,
+        )
 
     for start in iterator:
-        end = min(start + 256, indices.size)
+        end = min(start + COPY_BLOCK_SIZE, indices.size)
         out[start:end] = src[name][indices[start:end]]
 
 

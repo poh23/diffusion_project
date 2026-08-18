@@ -62,6 +62,12 @@ def init_charges(n_particles, charge_values, charge_counts, rng):
     return init_charges_two_populations(n_particles, values, counts, rng=rng)
 
 
+def _init_radius_bounds(value):
+    if isinstance(value, (list, tuple)):
+        return float(value[0]), float(value[1])
+    return 0.0, float(value)
+
+
 def init_positions_by_charge_radii(charges, init_radii, rng):
     charges = np.asarray(charges, dtype=np.float64)
     unique = np.unique(charges)
@@ -77,14 +83,18 @@ def init_positions_by_charge_radii(charges, init_radii, rng):
     high_mask = np.isclose(charges, high_charge)
 
     positions = np.empty((charges.size, 2), dtype=np.float64)
+    low_inner, low_outer = _init_radius_bounds(init_radii["low"])
     positions[low_mask] = init_positions_jittered_disk(
         int(np.count_nonzero(low_mask)),
-        radius=float(init_radii["low"]),
+        radius=low_outer,
+        inner_radius=low_inner,
         rng=rng,
     )
+    high_inner, high_outer = _init_radius_bounds(init_radii["high"])
     positions[high_mask] = init_positions_jittered_disk(
         int(np.count_nonzero(high_mask)),
-        radius=float(init_radii["high"]),
+        radius=high_outer,
+        inner_radius=high_inner,
         rng=rng,
     )
     return positions

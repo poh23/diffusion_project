@@ -21,6 +21,7 @@ from diffusion_sim.plotting import (
     plot_scaled_signed_mean_radius_difference_vs_ratio_by_k,
     plot_scaled_signed_radial_wasserstein_vs_ratio_by_k,
     plot_low_radius_vs_high_population_by_low_population,
+    plot_low_radius_vs_high_population_by_initial_radii,
     plot_signed_mean_radius_difference_vs_charge_value_ratio,
     plot_signed_mean_radius_difference_vs_ratio,
     plot_signed_radial_wasserstein_vs_ratio,
@@ -113,6 +114,60 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
         self.assertTrue(np.allclose(series[3]["n2"], [0.0]))
         expected = 5.0 / ((3.0 * 1.0 ** 2 * 4.0) ** (1.0 / 5.0))
         self.assertTrue(np.allclose(series[3]["r1"], [expected]))
+
+    def test_plot_low_radius_vs_high_population_groups_by_initial_radii(self):
+        base = {
+            "times": np.array([4.0], dtype=np.float64),
+            "energy": np.array([0.0], dtype=np.float64),
+            "std": np.array([0.0], dtype=np.float64),
+        }
+        sim_a = {
+            **base,
+            "positions": np.array([[[1.0, 0.0], [2.0, 0.0], [10.0, 0.0]]], dtype=np.float64),
+            "charges": np.array([1.0, 1.0, 5.0], dtype=np.float64),
+            "final_positions": np.zeros((3, 2), dtype=np.float64),
+            "meta": {"k": 3.0, "init_radii": {"low": [0.0, 1.0], "high": [2.0, 3.0]}},
+        }
+        sim_b = {
+            **base,
+            "positions": np.array([[[1.0, 0.0], [3.0, 0.0], [10.0, 0.0], [11.0, 0.0]]], dtype=np.float64),
+            "charges": np.array([1.0, 1.0, 5.0, 5.0], dtype=np.float64),
+            "final_positions": np.zeros((4, 2), dtype=np.float64),
+            "meta": {"k": 3.0, "init_radii": {"low": [0.0, 1.0], "high": [2.0, 3.0]}},
+        }
+        sim_c = {
+            **base,
+            "positions": np.array([[[2.0, 0.0], [4.0, 0.0], [6.0, 0.0], [10.0, 0.0]]], dtype=np.float64),
+            "charges": np.array([1.0, 1.0, 1.0, 5.0], dtype=np.float64),
+            "final_positions": np.zeros((4, 2), dtype=np.float64),
+            "meta": {"k": 3.0, "init_radii": {"low": [0.0, 2.0], "high": [3.0, 4.0]}},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            save_npz(tmp_path / "b.npz", sim_b)
+            save_npz(tmp_path / "a.npz", sim_a)
+            save_npz(tmp_path / "c.npz", sim_c)
+
+            _, ax, series = plot_low_radius_vs_high_population_by_initial_radii(
+                tmp_path,
+                time=4.0,
+                low_percentile=100.0,
+                scaled=True,
+                show=False,
+            )
+
+        self.assertEqual(
+            sorted(series),
+            ["low=[0,1], high=[2,3]", "low=[0,2], high=[3,4]"],
+        )
+        self.assertTrue(np.allclose(series["low=[0,1], high=[2,3]"]["n2"], [1.0, 2.0]))
+        self.assertTrue(np.allclose(series["low=[0,2], high=[3,4]"]["n2"], [1.0]))
+        self.assertEqual(
+            [line.get_label() for line in ax.lines],
+            ["low=[0,1], high=[2,3]", "low=[0,2], high=[3,4]"],
+        )
+        self.assertNotEqual(ax.lines[0].get_color(), ax.lines[1].get_color())
 
     def test_plot_low_radius_vs_high_population_rejects_scaled_zero_time(self):
         sim = {

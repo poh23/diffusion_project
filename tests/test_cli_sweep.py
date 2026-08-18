@@ -32,6 +32,10 @@ def _args_with_config_overrides(**overrides):
         init_radius=None,
         init_radius_low=None,
         init_radius_high=None,
+        init_radius_low_min=None,
+        init_radius_low_max=None,
+        init_radius_high_min=None,
+        init_radius_high_max=None,
         charge_values=None,
         charge_counts=None,
         t0=None,
@@ -105,6 +109,31 @@ class TestCliSweep(unittest.TestCase):
             )
         )
         self.assertEqual(config.init_radii, {"low": 0.25, "high": 1.5})
+
+    def test_config_from_args_sets_init_radii_ranges_from_cli(self):
+        config = _config_from_args(
+            _args_with_config_overrides(
+                init_radius_low_min=0.0,
+                init_radius_low_max=1.0,
+                init_radius_high_min=2.0,
+                init_radius_high_max=3.0,
+            )
+        )
+        self.assertEqual(config.init_radii, {"low": [0.0, 1.0], "high": [2.0, 3.0]})
+
+    def test_config_from_args_rejects_partial_init_radius_range(self):
+        with self.assertRaises(ValueError):
+            _config_from_args(_args_with_config_overrides(init_radius_low_min=0.0))
+
+    def test_config_from_args_rejects_scalar_and_range_for_same_population(self):
+        with self.assertRaises(ValueError):
+            _config_from_args(
+                _args_with_config_overrides(
+                    init_radius_low=1.0,
+                    init_radius_low_min=0.0,
+                    init_radius_low_max=1.0,
+                )
+            )
 
 
 if __name__ == "__main__":

@@ -659,6 +659,30 @@ def _compute_low_radius_population_point(sim, *, time, low_percentile=95.0, scal
     return n1, n2, r1, t_used
 
 
+def _format_radius_spec(value):
+    if isinstance(value, (list, tuple, np.ndarray)):
+        if len(value) == 2:
+            return f"[{float(value[0]):g},{float(value[1]):g}]"
+        return "[" + ",".join(f"{float(v):g}" for v in value) + "]"
+    return f"{float(value):g}"
+
+
+def _initial_radii_group_label(meta):
+    init_radii = (meta or {}).get("init_radii")
+    if init_radii is not None:
+        if not isinstance(init_radii, dict) or "low" not in init_radii or "high" not in init_radii:
+            raise ValueError("meta['init_radii'] must contain 'low' and 'high'.")
+        return (
+            f"low={_format_radius_spec(init_radii['low'])}, "
+            f"high={_format_radius_spec(init_radii['high'])}"
+        )
+
+    init_radius = (meta or {}).get("init_radius")
+    if init_radius is None:
+        raise ValueError("Simulation metadata does not include init_radii or init_radius.")
+    return f"R0={float(init_radius):g}"
+
+
 def plot_low_radius_vs_high_population_by_low_population(
     directory,
     time,
@@ -740,6 +764,102 @@ def plot_low_radius_vs_high_population_by_low_population(
     ax.set_title(
         ("Scaled " if scaled else "") + "Low-Charge Radius vs High-Charge Population Size\n"
         f"(target t={float(time):.3g}, low p={low_percentile:g})"
+    )
+    ax.grid(True, alpha=0.3)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    elif created_fig:
+        plt.close(fig)
+    return fig, ax, series
+
+
+def plot_low_radius_vs_high_population_by_initial_radii(
+    directory,
+    time,
+    low_percentile=95.0,
+    scaled=True,
+    k=None,
+    ax=None,
+    show=True,
+):
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise ValueError(f"Expected a directory path, got: {directory}")
+    paths = sorted(
+        path for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in {".npz", ".h5", ".hdf5"}
+    )
+    if not paths:
+        raise ValueError(f"No supported simulation files found in directory: {directory}")
+
+    grouped = {}
+    print(f"[plot] computing R1 vs N2 grouped by initial radii for {len(paths)} file(s)")
+    for index, path in enumerate(paths, start=1):
+        print(f"[plot] processing file {index}/{len(paths)}: {path}")
+        sim = _load_sim_nearest_frame_auto(path, time)
+        try:
+            group_label = _initial_radii_group_label(sim.get("meta", {}) or {})
+            n1, n2, r1, t_used = _compute_low_radius_population_point(
+                sim,
+                time=time,
+                low_percentile=low_percentile,
+                scaled=scaled,
+                k=k,
+            )
+        except ValueError as exc:
+            print(f"Warning: {path}: {exc}; skipping.")
+            continue
+
+        if not np.isfinite(r1):
+            print(f"Warning: non-finite R1 for {path}; skipping.")
+            continue
+
+        grouped.setdefault(
+            group_label,
+            {"n1": [], "n2": [], "r1": [], "actual_times": [], "labels": []},
+        )
+        grouped[group_label]["n1"].append(float(n1))
+        grouped[group_label]["n2"].append(float(n2))
+        grouped[group_label]["r1"].append(float(r1))
+        grouped[group_label]["actual_times"].append(float(t_used))
+        grouped[group_label]["labels"].append(path.name)
+
+    if not grouped:
+        raise ValueError("No valid files produced a finite initial-radii, N2, and R1 tuple.")
+
+    series = {}
+    for group_label, values in grouped.items():
+        order = np.argsort(values["n2"])
+        series[group_label] = {
+            "n1": np.asarray(values["n1"], dtype=np.float64)[order],
+            "n2": np.asarray(values["n2"], dtype=np.float64)[order],
+            "r1": np.asarray(values["r1"], dtype=np.float64)[order],
+            "actual_times": np.asarray(values["actual_times"], dtype=np.float64)[order],
+            "labels": np.asarray(values["labels"], dtype=object)[order],
+        }
+
+    created_fig = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        created_fig = True
+    else:
+        fig = ax.figure
+
+    for group_label in sorted(series):
+        values = series[group_label]
+        ax.plot(values["n2"], values["r1"], marker="o", linewidth=2, label=group_label)
+
+    ax.set_xlabel(r"High-Charge Population Size $N_2$")
+    ax.set_ylabel(
+        r"$R_1 / \left[N\left((N_1/N)q_1 + (N_2/N)q_2\right)^2 t\right]^{1/(k+2)}$"
+        if scaled else r"$R_1$"
+    )
+    ax.set_title(
+        ("Scaled " if scaled else "") + "Low-Charge Radius vs High-Charge Population Size\n"
+        f"(grouped by initial radii, target t={float(time):.3g}, low p={low_percentile:g})"
     )
     ax.grid(True, alpha=0.3)
     ax.legend(frameon=False)
@@ -884,6 +1004,7 @@ __all__ = [
     "plot_high_inner_radius_vs_charge_product",
     "plot_low_inner_radius_vs_charge_product",
     "plot_low_inner_radius_vs_low_population",
+    "plot_low_radius_vs_high_population_by_initial_radii",
     "plot_low_radius_vs_high_population_by_low_population",
     "plot_inner_radius_ratio_power_vs_charge_value_ratio",
     "plot_radial_force_balance",

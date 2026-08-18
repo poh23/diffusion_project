@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import h5py
 import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -95,7 +96,13 @@ class TestReduceCli(unittest.TestCase):
             save_h5(path, sim)
 
             process_path(path, stride=2, progress=False)
-            reduced = load_h5(Path(tmp_dir) / "run_reduced.h5")
+            reduced_path = Path(tmp_dir) / "run_reduced.h5"
+            reduced = load_h5(reduced_path)
+            with h5py.File(reduced_path, "r") as h5:
+                self.assertIsNotNone(h5["positions"].chunks)
+                self.assertIsNone(h5["positions"].maxshape[0])
+                self.assertIsNotNone(h5["times"].chunks)
+                self.assertIsNone(h5["times"].maxshape[0])
 
         self.assertTrue(np.array_equal(reduced["times"], np.array([0.0, 1.0, 2.0])))
         self.assertTrue(np.array_equal(reduced["positions"], sim["positions"][[0, 2, 4]]))

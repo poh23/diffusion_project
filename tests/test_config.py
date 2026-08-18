@@ -71,6 +71,55 @@ class TestConfigValidation(unittest.TestCase):
         self.assertEqual(config.init_radii, {"low": 0.5, "high": 1.0})
         validate_config(config)
 
+    def test_init_radii_ranges_load_from_json(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "n_particles": 2,
+                        "charge_values": [1.0, 2.0],
+                        "charge_counts": [1, 1],
+                        "init_radii": {"low": [0.0, 1.0], "high": [2.0, 3.0]},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = load_config_file(path)
+
+        self.assertEqual(config.init_radii, {"low": [0.0, 1.0], "high": [2.0, 3.0]})
+        validate_config(config)
+
+    def test_init_radii_range_rejects_negative_inner(self):
+        config = SimulationConfig(
+            n_particles=2,
+            charge_values=(1.0, 2.0),
+            charge_counts=(1, 1),
+            init_radii={"low": [-0.1, 1.0], "high": [2.0, 3.0]},
+        )
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
+    def test_init_radii_range_rejects_reversed_bounds(self):
+        config = SimulationConfig(
+            n_particles=2,
+            charge_values=(1.0, 2.0),
+            charge_counts=(1, 1),
+            init_radii={"low": [1.0, 1.0], "high": [2.0, 3.0]},
+        )
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
+    def test_init_radii_range_rejects_wrong_length(self):
+        config = SimulationConfig(
+            n_particles=2,
+            charge_values=(1.0, 2.0),
+            charge_counts=(1, 1),
+            init_radii={"low": [0.0, 1.0, 2.0], "high": [2.0, 3.0]},
+        )
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
 
 if __name__ == "__main__":
     unittest.main()
