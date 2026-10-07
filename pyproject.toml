@@ -8,6 +8,7 @@ dependencies = [
     "h5py>=3.11.0",
     "imageio-ffmpeg>=0.6.0",
     "ipykernel>=7.1.0",
+    "ipympl>=0.10.0",
     "ipython>=9.8.0",
     "matplotlib>=3.10.7",
     "numba>=0.63.0",

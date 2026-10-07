@@ -18,6 +18,7 @@ from diffusion_sim.plotting import (
     compute_signed_mean_radius_difference,
     compute_signed_radial_wasserstein,
     plot_density_vs_radius,
+    plot_inverse_density_squared_vs_radius_squared,
     plot_scaled_signed_mean_radius_difference_vs_ratio_by_k,
     plot_scaled_signed_radial_wasserstein_vs_ratio_by_k,
     plot_low_radius_vs_high_population_by_low_population,
@@ -86,6 +87,81 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
             r"$R_1 / \left[N\left((N_1/N)q_1 + (N_2/N)q_2\right)^2 t\right]^{1/(k+2)}$",
         )
         self.assertEqual([line.get_label() for line in ax.lines], ["N1=2", "N1=3"])
+        self.assertEqual(ax.get_xscale(), "linear")
+        self.assertEqual(ax.get_yscale(), "linear")
+
+    def test_plot_low_radius_vs_high_population_loglog_fit_adds_power_law_per_series(self):
+        def make_sim(low_outer_radius, n_high):
+            low_positions = [[[1.0, 0.0], [low_outer_radius, 0.0]]]
+            high_positions = [[[20.0 + i, 0.0] for i in range(n_high)]]
+            positions = np.array([low_positions[0] + high_positions[0]], dtype=np.float64)
+            return {
+                "times": np.array([1.0], dtype=np.float64),
+                "positions": positions,
+                "charges": np.array([1.0, 1.0] + [5.0] * n_high, dtype=np.float64),
+                "energy": np.array([0.0], dtype=np.float64),
+                "std": np.array([0.0], dtype=np.float64),
+                "final_positions": np.zeros((2 + n_high, 2), dtype=np.float64),
+                "meta": {"k": -1.0},
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            save_npz(tmp_path / "n2_1.npz", make_sim(2.0, 1))
+            save_npz(tmp_path / "n2_2.npz", make_sim(4.0, 2))
+            save_npz(tmp_path / "n2_4.npz", make_sim(8.0, 4))
+
+            _, ax, series = plot_low_radius_vs_high_population_by_low_population(
+                tmp_path,
+                time=1.0,
+                low_percentile=100.0,
+                scaled=False,
+                loglog_fit=True,
+                show=False,
+            )
+
+        self.assertTrue(np.allclose(series[2]["n2"], [1.0, 2.0, 4.0]))
+        self.assertTrue(np.allclose(series[2]["r1"], [2.0, 4.0, 8.0]))
+        self.assertEqual(ax.get_xscale(), "log")
+        self.assertEqual(ax.get_yscale(), "log")
+        self.assertEqual(len(ax.lines), 2)
+        fit_line = ax.lines[1]
+        self.assertIn("Fit N1=2", fit_line.get_label())
+        self.assertTrue(np.allclose(fit_line.get_ydata(), 2.0 * fit_line.get_xdata()))
+
+    def test_plot_low_radius_vs_high_population_normalizes_each_series_by_first_value(self):
+        def make_sim(low_outer_radius, n_high):
+            positions = np.array(
+                [[[1.0, 0.0], [low_outer_radius, 0.0]] + [[20.0 + i, 0.0] for i in range(n_high)]],
+                dtype=np.float64,
+            )
+            return {
+                "times": np.array([1.0], dtype=np.float64),
+                "positions": positions,
+                "charges": np.array([1.0, 1.0] + [5.0] * n_high, dtype=np.float64),
+                "energy": np.array([0.0], dtype=np.float64),
+                "std": np.array([0.0], dtype=np.float64),
+                "final_positions": np.zeros((2 + n_high, 2), dtype=np.float64),
+                "meta": {"k": -1.0},
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            save_npz(tmp_path / "n2_2.npz", make_sim(6.0, 2))
+            save_npz(tmp_path / "n2_1.npz", make_sim(3.0, 1))
+
+            _, ax, series = plot_low_radius_vs_high_population_by_low_population(
+                tmp_path,
+                time=1.0,
+                low_percentile=100.0,
+                scaled=False,
+                normalize=True,
+                show=False,
+            )
+
+        self.assertTrue(np.allclose(series[2]["n2"], [1.0, 2.0]))
+        self.assertTrue(np.allclose(series[2]["r1"], [1.0, 2.0]))
+        self.assertEqual(ax.get_ylabel(), r"Normalized $R_1 / t^{k+2}$")
 
     def test_plot_low_radius_vs_high_population_includes_one_population_as_zero_high(self):
         sim = {
@@ -114,6 +190,32 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
         self.assertTrue(np.allclose(series[3]["n2"], [0.0]))
         expected = 5.0 / ((3.0 * 1.0 ** 2 * 4.0) ** (1.0 / 5.0))
         self.assertTrue(np.allclose(series[3]["r1"], [expected]))
+
+    def test_plot_low_radius_vs_high_population_unscaled_normalizes_by_time_power(self):
+        sim = {
+            "times": np.array([4.0], dtype=np.float64),
+            "positions": np.array([[[1.0, 0.0], [5.0, 0.0], [10.0, 0.0]]], dtype=np.float64),
+            "charges": np.array([1.0, 1.0, 5.0], dtype=np.float64),
+            "energy": np.array([0.0], dtype=np.float64),
+            "std": np.array([0.0], dtype=np.float64),
+            "final_positions": np.zeros((3, 2), dtype=np.float64),
+            "meta": {"k": -1.0},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            save_npz(tmp_path / "run.npz", sim)
+
+            _, ax, series = plot_low_radius_vs_high_population_by_low_population(
+                tmp_path,
+                time=4.0,
+                low_percentile=100.0,
+                scaled=False,
+                show=False,
+            )
+
+        self.assertTrue(np.allclose(series[2]["r1"], [5.0 / (4.0 ** 1.0)]))
+        self.assertEqual(ax.get_ylabel(), r"$R_1 / t^{k+2}$")
 
     def test_plot_low_radius_vs_high_population_groups_by_initial_radii(self):
         base = {
@@ -257,14 +359,52 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
                 tmp_path,
                 time=4.0,
                 low_percentile=100.0,
-                fit_origin=True,
                 show=False,
             )
 
-        expected_a = 2.0 / ((4.0 * 3.0 ** 2 * 4.0) ** (1.0 / 5.0))
-        expected_b = 5.0 / ((4.0 * 2.0 ** 2 * 4.0) ** (1.0 / 5.0))
-        self.assertTrue(np.allclose(n_low, [1.0, 2.0]))
-        self.assertTrue(np.allclose(r1, [expected_b, expected_a]))
+        scale = 4.0 ** (1.0 / 5.0)
+        expected_a = 2.0 / scale
+        expected_b = 5.0 / scale
+        self.assertTrue(np.allclose(n_low, [2.0, 3.0]))
+        self.assertTrue(np.allclose(r1, [expected_a, expected_b]))
+        self.assertEqual(ax.get_xlabel(), r"Low-Charge Population Size $N_{\mathrm{low}}$")
+        self.assertEqual(ax.get_ylabel(), r"$r_1 / t^{1/(k+2)}$")
+        self.assertTrue(any("Fit:" in line.get_label() for line in ax.lines))
+
+    def test_plot_low_inner_radius_vs_low_population_supports_one_population(self):
+        sim_a = {
+            "times": np.array([4.0], dtype=np.float64),
+            "positions": np.array([[[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]], dtype=np.float64),
+            "charges": np.ones(3, dtype=np.float64),
+            "energy": np.array([0.0], dtype=np.float64),
+            "std": np.array([0.0], dtype=np.float64),
+            "final_positions": np.zeros((3, 2), dtype=np.float64),
+            "meta": {"k": 0.0},
+        }
+        sim_b = {
+            "times": np.array([4.0], dtype=np.float64),
+            "positions": np.array([[[1.0, 0.0], [2.0, 0.0], [3.0, 0.0], [4.0, 0.0]]], dtype=np.float64),
+            "charges": np.ones(4, dtype=np.float64),
+            "energy": np.array([0.0], dtype=np.float64),
+            "std": np.array([0.0], dtype=np.float64),
+            "final_positions": np.zeros((4, 2), dtype=np.float64),
+            "meta": {"k": 0.0},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            save_npz(tmp_path / "a.npz", sim_a)
+            save_npz(tmp_path / "b.npz", sim_b)
+
+            _, ax, n_low, r1, _, _ = plot_low_inner_radius_vs_low_population(
+                tmp_path,
+                time=4.0,
+                low_percentile=100.0,
+                show=False,
+            )
+
+        self.assertTrue(np.allclose(n_low, [3.0, 4.0]))
+        self.assertTrue(np.allclose(r1, [1.5, 2.0]))
         self.assertTrue(any("Fit:" in line.get_label() for line in ax.lines))
 
     def test_signed_mean_radius_difference_is_positive_when_higher_charge_is_farther_out(self):
@@ -661,6 +801,142 @@ class TestPlottingRadialWasserstein(unittest.TestCase):
         self.assertTrue(np.allclose(first_line.get_ydata(), [4.0, 4.0]))
         self.assertEqual(ax.get_xlabel(), r"$r / t^{\frac{1}{k+2}}$")
         self.assertEqual(ax.get_ylabel(), r"$\rho t^{\frac{2}{k+2}}$")
+
+    def test_plot_inverse_density_squared_vs_radius_squared_transforms_axes(self):
+        sim = {
+            "times": np.array([1.0], dtype=np.float64),
+            "radii": np.array([[1.0, 2.0, 3.0, 4.0]], dtype=np.float64),
+            "density": np.array([[1.0, 2.0, 4.0, 8.0]], dtype=np.float64),
+            "charges": np.ones(4, dtype=np.float64),
+            "meta": {},
+        }
+
+        _, ax = plot_inverse_density_squared_vs_radius_squared(
+            sim,
+            times=[1.0],
+            window_frac=0.0,
+            split_by_charge=False,
+            min_points=1,
+            show=False,
+        )
+
+        first_line = ax.lines[0]
+        self.assertTrue(np.allclose(first_line.get_xdata(), [1.0, 4.0, 9.0, 16.0]))
+        self.assertTrue(np.allclose(first_line.get_ydata(), [1.0, 0.25, 0.0625, 0.015625]))
+        self.assertEqual(ax.get_xlabel(), r"$r^2$")
+        self.assertEqual(ax.get_ylabel(), r"$\rho^{-2}$")
+
+    def test_plot_inverse_density_squared_vs_radius_squared_scaled_rescales_before_transform(self):
+        sim = {
+            "times": np.array([4.0], dtype=np.float64),
+            "radii": np.array([[1.0, 1.2, 3.0, 3.2]], dtype=np.float64),
+            "density": np.ones((1, 4), dtype=np.float64),
+            "charges": np.array([1.0, 1.0, 5.0, 5.0], dtype=np.float64),
+            "meta": {"k": 0.0},
+        }
+
+        _, ax = plot_inverse_density_squared_vs_radius_squared(
+            sim,
+            times=[4.0],
+            scaled=True,
+            window_frac=0.0,
+            drop_zeros=False,
+            min_points=1,
+            show=False,
+        )
+
+        first_line = ax.lines[0]
+        radius_scale = (4.0 * 4.0 * (0.5 * 1.0 + 0.5 * 5.0) ** 2) ** 0.5
+        density_scale = (1.0 / 2.0) * (4.0 * 4.0 * (0.5 * 1.0 + 0.5 * 5.0) ** 2)
+        self.assertTrue(np.allclose(first_line.get_xdata(), [(1.0 / radius_scale) ** 2, (1.2 / radius_scale) ** 2]))
+        self.assertTrue(np.allclose(first_line.get_ydata(), [density_scale ** -2, density_scale ** -2]))
+        self.assertEqual(
+            ax.get_xlabel(),
+            r"$\left(r / \left[Nt\left(\frac{N_1}{N}q_1+\frac{N_2}{N}q_2\right)^2\right]^{\frac{1}{k+2}}\right)^2$",
+        )
+        self.assertEqual(
+            ax.get_ylabel(),
+            r"$\left(\rho\frac{1}{N_1}\left[Nt\left(\frac{N_1}{N}q_1+\frac{N_2}{N}q_2\right)^2\right]^{\frac{2}{k+2}}\right)^{-2}$",
+        )
+
+    def test_plot_inverse_density_squared_vs_radius_squared_scaled_supports_one_population(self):
+        sim = {
+            "times": np.array([4.0], dtype=np.float64),
+            "radii": np.array([[1.0, 2.0, 3.0, 4.0]], dtype=np.float64),
+            "density": np.ones((1, 4), dtype=np.float64),
+            "charges": np.ones(4, dtype=np.float64),
+            "meta": {"k": 0.0},
+        }
+
+        _, ax = plot_inverse_density_squared_vs_radius_squared(
+            sim,
+            times=[4.0],
+            scaled=True,
+            window_frac=0.0,
+            drop_zeros=False,
+            min_points=1,
+            show=False,
+        )
+
+        first_line = ax.lines[0]
+        radius_scale = (4.0 * 4.0 * 1.0 ** 2) ** 0.5
+        density_scale = (1.0 / 4.0) * (4.0 * 4.0 * 1.0 ** 2)
+        self.assertTrue(
+            np.allclose(
+                first_line.get_xdata(),
+                [(1.0 / radius_scale) ** 2, (2.0 / radius_scale) ** 2, (3.0 / radius_scale) ** 2, (4.0 / radius_scale) ** 2],
+            )
+        )
+        self.assertTrue(np.allclose(first_line.get_ydata(), np.full(4, density_scale ** -2)))
+
+    def test_plot_inverse_density_squared_vs_radius_squared_requires_density_array(self):
+        sim = {
+            "times": np.array([4.0], dtype=np.float64),
+            "positions": np.zeros((1, 4, 2), dtype=np.float64),
+            "density": None,
+            "charges": np.ones(4, dtype=np.float64),
+            "meta": {"k": 0.0},
+        }
+
+        with self.assertRaisesRegex(KeyError, "density"):
+            plot_inverse_density_squared_vs_radius_squared(
+                sim,
+                times=[4.0],
+                scaled=True,
+                min_points=1,
+                show=False,
+            )
+
+    def test_plot_inverse_density_squared_linear_fit_uses_selected_prefix_before_tail(self):
+        x = np.arange(7, dtype=np.float64)
+        y_tail = np.array([10.0, 8.0, 6.0, 4.0, 2.0, 100.0, 200.0], dtype=np.float64)
+        y_other = np.array([1.0, 2.0, 3.0, 4.0, 100.0, 200.0, 300.0], dtype=np.float64)
+        sim = {
+            "times": np.array([1.0, 2.0], dtype=np.float64),
+            "radii": np.sqrt(np.vstack([x, x])),
+            "density": np.vstack([y_other ** -0.5, y_tail ** -0.5]),
+            "charges": np.ones(7, dtype=np.float64),
+            "meta": {},
+        }
+
+        _, ax = plot_inverse_density_squared_vs_radius_squared(
+            sim,
+            times=[1.0, 2.0],
+            window_frac=0.0,
+            split_by_charge=False,
+            min_points=3,
+            show=False,
+            fit_linear=True,
+            fit_time=2.0,
+            fit_min_points=3,
+            fit_smooth_window_frac=0.0,
+        )
+
+        fit_line = ax.lines[-1]
+        self.assertEqual(fit_line.get_linestyle(), "--")
+        self.assertTrue(np.allclose(fit_line.get_xdata(), [0.0, 4.0]))
+        self.assertTrue(np.allclose(fit_line.get_ydata(), [10.0, 2.0]))
+        self.assertIn("t~2", fit_line.get_label())
 
 
 if __name__ == "__main__":

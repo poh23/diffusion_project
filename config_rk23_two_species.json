@@ -1,19 +1,19 @@
 {
   "method": "rk23",
-  "n_particles": 3000,
-  "k": 3.0,
+  "n_particles": 1000,
+  "k": -1.0,
   "v0": 1.0,
   "l": 1.0,
   "r_floor": 1e-7,
   "init_radius": 0.5,
   "init_radii": {
-    "low": 2.0,
-    "high": 1.0
+    "low": 0.5,
+    "high": 0.5
   },
   "t0": 0.0,
-  "t_duration": 100,
-  "save_every": 1e-2,
-  "max_step_global": 1,
+  "t_duration": 5.0,
+  "save_every": 1e-3,
+  "max_step_global": 1e-3,
   "interpolate_sampling": true,
   "external_potential": "harmonic",
   "external_potential_params": {
@@ -28,7 +28,7 @@
   "rtol": 1e-3,
   "atol": 1e-3,
   "charge_values": [1.0, 10.0],
-  "charge_counts": [1500, 1500],
+  "charge_counts": [100, 900],
   "diffusion": false,
   "diffusion_coeff": 1.0,
   "diffusion_noise_var": 1.0,

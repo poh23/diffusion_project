@@ -1,7 +1,11 @@
 """Plotting package organized by analysis area."""
 
 from .animation_video import animate_mp4, embed_mp4, save_mp4
-from .density_profile_plots import plot_density_vs_radius, plot_scaled_density_vs_radius
+from .density_profile_plots import (
+    plot_density_vs_radius,
+    plot_inverse_density_squared_vs_radius_squared,
+    plot_scaled_density_vs_radius,
+)
 from .energy_metrics import plot_energy, plot_energy_by_charge
 from .mean_radial_separation_plots import (
     compute_signed_mean_radius_difference,
@@ -46,6 +50,7 @@ __all__ = [
     "plot_high_inner_radius_vs_charge_product",
     "plot_inner_particles_selfsimilar_radius",
     "plot_inner_radius_ratio_power_vs_charge_value_ratio",
+    "plot_inverse_density_squared_vs_radius_squared",
     "plot_low_inner_radius_vs_charge_product",
     "plot_low_inner_radius_vs_low_population",
     "plot_low_radius_vs_high_population_by_initial_radii",

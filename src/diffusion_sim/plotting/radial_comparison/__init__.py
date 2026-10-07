@@ -480,7 +480,7 @@ def plot_low_inner_radius_vs_low_population(
     time,
     low_percentile=95.0,
     high_inner_percentile=5.0,
-    fit_origin=False,
+    fit_origin=True,
     k=None,
     ax=None,
     show=True,
@@ -506,23 +506,32 @@ def plot_low_inner_radius_vs_low_population(
         try:
             charges = np.asarray(sim["charges"], dtype=np.float64)
             unique = np.unique(charges)
-            if unique.size != 2:
+            if unique.size not in {1, 2}:
                 raise ValueError(
-                    f"Expected exactly two charge populations, found {unique.size}: {unique.tolist()}"
+                    f"Expected one or two charge populations, found {unique.size}: {unique.tolist()}"
                 )
             q_low = float(unique[0])
             n_low = int(np.count_nonzero(np.isclose(charges, q_low)))
-            n_high = int(np.count_nonzero(np.isclose(charges, unique[1])))
             if n_low <= 0:
                 raise ValueError("Low-charge population is empty.")
-            if n_high <= 0:
-                raise ValueError("High-charge population is empty.")
-            t_used, r1, _ = _compute_low_and_high_inner_radii(
-                sim,
-                time=time,
-                low_percentile=low_percentile,
-                high_inner_percentile=high_inner_percentile,
-            )
+            if unique.size == 1:
+                positions = np.asarray(sim["positions"], dtype=np.float64)
+                times = np.asarray(sim["times"], dtype=np.float64)
+                if positions.shape[0] == 0 or times.size == 0:
+                    raise ValueError("Simulation output has no saved frames.")
+                idx = int(np.abs(times - time).argmin())
+                t_used = float(times[idx])
+                r1 = float(np.percentile(np.linalg.norm(positions[idx], axis=1), low_percentile))
+            else:
+                n_high = int(np.count_nonzero(np.isclose(charges, unique[1])))
+                if n_high <= 0:
+                    raise ValueError("High-charge population is empty.")
+                t_used, r1, _ = _compute_low_and_high_inner_radii(
+                    sim,
+                    time=time,
+                    low_percentile=low_percentile,
+                    high_inner_percentile=high_inner_percentile,
+                )
             k_value = float(k if k is not None else (sim.get("meta", {}) or {}).get("k"))
             if not np.isfinite(k_value):
                 raise ValueError("k is missing or non-finite.")
@@ -530,18 +539,15 @@ def plot_low_inner_radius_vs_low_population(
                 raise ValueError("k=-2 is invalid (division by zero in exponent).")
             if t_used <= 0.0:
                 raise ValueError("Cannot scale r1 when nearest saved time is <= 0.")
-            n_total = int(charges.size)
-            q_high = float(unique[1])
-            q_mean = (n_low / n_total) * q_low + (n_high / n_total) * q_high
-            scale = (n_total * (q_mean ** 2) * t_used) ** (1.0 / (k_value + 2.0))
-            x_value = float(n_high)
+            scale = t_used ** (1.0 / (k_value + 2.0))
+            x_value = float(n_low)
             y_value = float(r1 / scale)
         except ValueError as exc:
             print(f"Warning: {path}: {exc}; skipping.")
             continue
 
         if not np.isfinite(x_value) or not np.isfinite(y_value):
-            print(f"Warning: non-finite N_high or scaled r1 for {path}; skipping.")
+            print(f"Warning: non-finite N_low or scaled r1 for {path}; skipping.")
             continue
 
         x_values.append(x_value)
@@ -550,7 +556,7 @@ def plot_low_inner_radius_vs_low_population(
         labels.append(path.name)
 
     if not x_values:
-        raise ValueError("No valid files produced a finite N_high and scaled r1 pair.")
+        raise ValueError("No valid files produced a finite N_low and scaled r1 pair.")
 
     order = np.argsort(x_values)
     x_arr = np.asarray(x_values, dtype=np.float64)[order]
@@ -582,12 +588,10 @@ def plot_low_inner_radius_vs_low_population(
                 linewidth=1.8,
                 label=rf"Fit: $y = {slope:.3g}x$",
             )
-    ax.set_xlabel(r"High-Charge Population Size $N_{\mathrm{high}}$")
-    ax.set_ylabel(
-        r"$r_1 / \left[N\left((N_1/N)q_1 + (N_2/N)q_2\right)^2 t\right]^{1/(k+2)}$"
-    )
+    ax.set_xlabel(r"Low-Charge Population Size $N_{\mathrm{low}}$")
+    ax.set_ylabel(r"$r_1 / t^{1/(k+2)}$")
     ax.set_title(
-        "Scaled Inner High-Charge Radius vs High-Charge Population Size\n"
+        "Scaled Low-Charge Radius vs Low-Charge Population Size\n"
         f"(target t={float(time):.3g}, low p={low_percentile:g}, high-inner p={high_inner_percentile:g})"
     )
     ax.grid(True, alpha=0.3)
@@ -610,9 +614,6 @@ def _compute_low_radius_population_point(sim, *, time, low_percentile=95.0, scal
 
     idx = int(np.abs(times - time).argmin())
     t_used = float(times[idx])
-    if scaled and t_used <= 0.0:
-        raise ValueError("Cannot scale radius when nearest saved time is <= 0.")
-
     pos = positions[idx]
     radii = np.linalg.norm(pos, axis=1)
     charges = sim.get("charges")
@@ -646,16 +647,26 @@ def _compute_low_radius_population_point(sim, *, time, low_percentile=95.0, scal
     if r_low.size == 0:
         raise ValueError("Low/single population is empty.")
     r1 = float(np.percentile(r_low, low_percentile))
+    k_raw = k if k is not None else (sim.get("meta", {}) or {}).get("k")
+    if k_raw is None:
+        raise ValueError("k is missing or non-finite.")
+    k_value = float(k_raw)
+    if not np.isfinite(k_value):
+        raise ValueError("k is missing or non-finite.")
     if scaled:
-        k_value = float(k if k is not None else (sim.get("meta", {}) or {}).get("k"))
-        if not np.isfinite(k_value):
-            raise ValueError("k is missing or non-finite.")
         if np.isclose(k_value, -2.0):
             raise ValueError("k=-2 is invalid (division by zero in exponent).")
+        if t_used <= 0.0:
+            raise ValueError("Cannot scale radius when nearest saved time is <= 0.")
         n_total = int(charges.size)
         q_mean = (n1 / n_total) * q_low + (n2 / n_total) * q_high
         scale = (n_total * (q_mean ** 2) * t_used) ** (1.0 / (k_value + 2.0))
         r1 /= float(scale)
+    else:
+        time_scale = t_used ** (k_value + 2.0)
+        if not np.isfinite(time_scale) or time_scale == 0.0:
+            raise ValueError("Cannot normalize radius by t^(k+2) for this nearest saved time.")
+        r1 /= float(time_scale)
     return n1, n2, r1, t_used
 
 
@@ -688,6 +699,8 @@ def plot_low_radius_vs_high_population_by_low_population(
     time,
     low_percentile=95.0,
     scaled=True,
+    loglog_fit=False,
+    normalize=False,
     k=None,
     ax=None,
     show=True,
@@ -738,9 +751,14 @@ def plot_low_radius_vs_high_population_by_low_population(
     series = {}
     for n1, values in grouped.items():
         order = np.argsort(values["n2"])
+        r1_sorted = np.asarray(values["r1"], dtype=np.float64)[order]
+        if normalize:
+            if r1_sorted.size == 0 or not np.isfinite(r1_sorted[0]) or r1_sorted[0] == 0.0:
+                raise ValueError(f"Cannot normalize N1={n1} series by its first R1 value.")
+            r1_sorted = r1_sorted / r1_sorted[0]
         series[int(n1)] = {
             "n2": np.asarray(values["n2"], dtype=np.float64)[order],
-            "r1": np.asarray(values["r1"], dtype=np.float64)[order],
+            "r1": r1_sorted,
             "actual_times": np.asarray(values["actual_times"], dtype=np.float64)[order],
             "labels": np.asarray(values["labels"], dtype=object)[order],
         }
@@ -754,19 +772,46 @@ def plot_low_radius_vs_high_population_by_low_population(
 
     for n1 in sorted(series):
         values = series[n1]
-        ax.plot(values["n2"], values["r1"], marker="o", linewidth=2, label=f"N1={n1}")
+        (line,) = ax.plot(values["n2"], values["r1"], marker="o", linewidth=2, label=f"N1={n1}")
+        if loglog_fit:
+            x = values["n2"]
+            y = values["r1"]
+            finite = np.isfinite(x) & np.isfinite(y) & (x > 0.0) & (y > 0.0)
+            if np.count_nonzero(finite) < 2 or np.unique(x[finite]).size < 2:
+                print(f"Warning: need at least two positive distinct N2 values for log-log fit for N1={n1}; skipping fit.")
+                continue
+            exponent, log_prefactor = np.polyfit(np.log(x[finite]), np.log(y[finite]), 1)
+            prefactor = float(np.exp(log_prefactor))
+            fit_x = np.exp(np.linspace(float(np.min(np.log(x[finite]))), float(np.max(np.log(x[finite]))), 200))
+            fit_y = prefactor * (fit_x ** exponent)
+            ax.plot(
+                fit_x,
+                fit_y,
+                linestyle="--",
+                linewidth=1.8,
+                color=line.get_color(),
+                label=rf"$y={prefactor:.3g}x^{{{exponent:.3g}}}$",
+            )
 
     ax.set_xlabel(r"High-Charge Population Size $N_2$")
     ax.set_ylabel(
-        r"$R_1 / \left[N\left((N_1/N)q_1 + (N_2/N)q_2\right)^2 t\right]^{1/(k+2)}$"
-        if scaled else r"$R_1$"
+        (
+            r"Normalized $R_1 / \left[N\left((N_1/N)q_1 + (N_2/N)q_2\right)^2 t\right]^{1/(k+2)}$"
+            if normalize
+            else r"$R_1 / \left[N\left((N_1/N)q_1 + (N_2/N)q_2\right)^2 t\right]^{1/(k+2)}$"
+        )
+        if scaled
+        else (r"Normalized $R_1 / t^{k+2}$" if normalize else r"$R_1 / t^{k+2}$")
     )
     ax.set_title(
-        ("Scaled " if scaled else "") + "Low-Charge Radius vs High-Charge Population Size\n"
+        ("Scaled " if scaled else "Time-Normalized ") + "Low-Charge Radius vs High-Charge Population Size\n"
         f"(target t={float(time):.3g}, low p={low_percentile:g})"
     )
     ax.grid(True, alpha=0.3)
     ax.legend(frameon=False)
+    if loglog_fit:
+        ax.set_xscale("log")
+        ax.set_yscale("log")
     fig.tight_layout()
 
     if show:
